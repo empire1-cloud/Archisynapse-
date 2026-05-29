@@ -1,0 +1,15 @@
+{
+  "name": "archisynapse-event-spine",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "consumers/event_spine_daemon.js",
+  "scripts": {
+    "start": "node consumers/event_spine_daemon.js"
+  },
+  "dependencies": {
+    "ajv": "^8.13.0",
+    "ajv-formats": "^3.0.1",
+    "amqplib": "^0.10.4",
+    "dotenv": "^16.4.5"
+  }
+}

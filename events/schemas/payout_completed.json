@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PayoutCompleted",
+  "type": "object",
+  "properties": {
+    "event_id": { "type": "string" },
+    "event_type": { "type": "string", "enum": ["payout.completed"] },
+    "tenant_id": { "type": "string" },
+    "payout_id": { "type": "string" },
+    "amount": { "type": "integer", "minimum": 1 },
+    "status": { "type": "string", "enum": ["completed"] },
+    "timestamp": { "type": "string" }
+  },
+  "required": ["event_id", "event_type", "tenant_id", "payout_id", "amount", "status", "timestamp"]
+}

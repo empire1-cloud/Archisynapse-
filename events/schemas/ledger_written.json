@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LedgerWritten",
+  "type": "object",
+  "properties": {
+    "event_id": { "type": "string" },
+    "event_type": { "type": "string", "enum": ["ledger.written"] },
+    "transaction_id": { "type": ["string", "null"] },
+    "debit_account_id": { "type": "string" },
+    "credit_account_id": { "type": "string" },
+    "amount": { "type": "integer", "minimum": 1 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "timestamp": { "type": "string" }
+  },
+  "required": ["event_id", "event_type", "debit_account_id", "credit_account_id", "amount", "currency", "timestamp"]
+}

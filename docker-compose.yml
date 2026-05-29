@@ -1,0 +1,181 @@
+version: '3.8'
+
+services:
+  # 1. Main Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: archisynapse-postgres
+    environment:
+      POSTGRES_USER: archisynapse
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: archisynapse_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U archisynapse -d archisynapse_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Cache & Rate Limiting Broker
+  redis:
+    image: redis:7-alpine
+    container_name: archisynapse-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: archisynapse-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # 4. API Gateway Service (Public facing gateway entry point)
+  gateway:
+    build:
+      context: ./services/gateway
+    container_name: archisynapse-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      REDIS_URL: redis://redis:6379
+      DB_HOST: postgres
+      DB_USER: archisynapse
+      DB_PASSWORD: secretpassword
+      DB_NAME: archisynapse_db
+      TRANSACTION_SERVICE_URL: http://transaction-service:8001
+      CUSTOMER_SERVICE_URL: http://customer-service:8002
+      PAYOUT_SERVICE_URL: http://payout-service:8003
+      ANALYTICS_SERVICE_URL: http://analytics-service:8007
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # 5. Transaction Service (Core payment processor logic)
+  transaction-service:
+    build:
+      context: ./services/transaction-service
+    container_name: archisynapse-transaction-service
+    environment:
+      PORT: 8001
+      DB_HOST: postgres
+      DB_USER: archisynapse
+      DB_PASSWORD: secretpassword
+      DB_NAME: archisynapse_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      FRAUD_SERVICE_URL: http://fraud-service:8005
+      LEDGER_SERVICE_URL: http://ledger-service:8004
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 6. Customer Service (Manage saved payment profiles)
+  customer-service:
+    build:
+      context: ./services/customer-service
+    container_name: archisynapse-customer-service
+    environment:
+      PORT: 8002
+      DB_HOST: postgres
+      DB_USER: archisynapse
+      DB_PASSWORD: secretpassword
+      DB_NAME: archisynapse_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 7. Payout Service (Track and compute settlement payments)
+  payout-service:
+    build:
+      context: ./services/payout-service
+    container_name: archisynapse-payout-service
+    environment:
+      PORT: 8003
+      DB_HOST: postgres
+      DB_USER: archisynapse
+      DB_PASSWORD: secretpassword
+      DB_NAME: archisynapse_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 8. Ledger Service (Transaction-safe double-entry record logs)
+  ledger-service:
+    build:
+      context: ./services/ledger-service
+    container_name: archisynapse-ledger-service
+    ports:
+      - "8004:8004"
+    environment:
+      PORT: 8004
+      DB_HOST: postgres
+      DB_USER: archisynapse
+      DB_PASSWORD: secretpassword
+      DB_NAME: archisynapse_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 9. Fraud Detection Service (Python ML assessment model)
+  fraud-service:
+    build:
+      context: ./services/fraud-service
+    container_name: archisynapse-fraud-service
+    ports:
+      - "8005:8005"
+    environment:
+      PORT: 8005
+      MODEL_THRESHOLD: 0.85
+    # Python relies on standard dependencies
+
+  # 10. Analytics Service (Gathers platform statistics & reporting)
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+    container_name: archisynapse-analytics-service
+    ports:
+      - "8007:8007"
+    environment:
+      PORT: 8007
+      DB_HOST: postgres
+      DB_USER: archisynapse
+      DB_PASSWORD: secretpassword
+      DB_NAME: archisynapse_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

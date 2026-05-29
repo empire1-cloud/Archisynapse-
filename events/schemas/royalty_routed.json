@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RoyaltyRouted",
+  "type": "object",
+  "properties": {
+    "event_id": { "type": "string" },
+    "event_type": { "type": "string", "enum": ["royalty.routed"] },
+    "tenant_id": { "type": "string" },
+    "transaction_id": { "type": "string" },
+    "creator_id": { "type": "string" },
+    "royalty_amount": { "type": "integer", "minimum": 1 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "timestamp": { "type": "string" }
+  },
+  "required": ["event_id", "event_type", "tenant_id", "transaction_id", "creator_id", "royalty_amount", "currency", "timestamp"]
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FraudFlagged",
+  "type": "object",
+  "properties": {
+    "event_id": { "type": "string" },
+    "event_type": { "type": "string", "enum": ["fraud.flagged"] },
+    "transaction_id": { "type": "string" },
+    "customer_id": { "type": "string" },
+    "amount": { "type": "integer" },
+    "fraud_score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "timestamp": { "type": "string" }
+  },
+  "required": ["event_id", "event_type", "transaction_id", "customer_id", "amount", "fraud_score", "timestamp"]
+}
