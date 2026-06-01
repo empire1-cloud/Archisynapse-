@@ -12,6 +12,7 @@ const customerRoutes = require('./routes/customers');
 const payoutRoutes = require('./routes/payouts');
 const webhookRoutes = require('./routes/webhooks');
 const dashboardRoutes = require('./routes/dashboard');
+const blueprintRoutes = require('./routes/blueprints');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -56,6 +57,7 @@ app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/payouts', payoutRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/blueprints', blueprintRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

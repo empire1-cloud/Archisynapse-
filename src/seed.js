@@ -1,5 +1,6 @@
 const transactionService = require('./services/transactionService');
 const customerService = require('./services/customerService');
+const blueprintService = require('./services/blueprintService');
 const logger = require('./utils/logger');
 
 const CUSTOMERS = [
@@ -53,6 +54,8 @@ const seed = async () => {
       transactionService.updateTransactionStatus(txn.id, t.status);
     }
   }
+
+  await blueprintService.seedBlueprints();
 
   logger.info(`Seed complete: ${customers.length} customers, ${TRANSACTIONS.length} transactions`);
 };

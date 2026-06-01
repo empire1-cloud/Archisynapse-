@@ -73,6 +73,12 @@ class ArchisynapseClient:
     def post(self, path: str, data: Optional[Dict] = None) -> Any:
         return self._request("POST", path, json=data or {})
 
+    def put(self, path: str, data: Optional[Dict] = None) -> Any:
+        return self._request("PUT", path, json=data or {})
+
+    def delete(self, path: str) -> Any:
+        return self._request("DELETE", path)
+
     # -- Customers --
     @property
     def customers(self) -> "CustomersResource":
@@ -97,6 +103,11 @@ class ArchisynapseClient:
     @property
     def dashboard(self) -> "DashboardResource":
         return DashboardResource(self)
+
+    # -- Blueprints --
+    @property
+    def blueprints(self) -> "BlueprintsResource":
+        return BlueprintsResource(self)
 
     # -- Health --
     def health(self) -> Dict:
@@ -185,3 +196,46 @@ class DashboardResource(BaseResource):
 
     def metrics(self) -> Dict:
         return self._client.get(self._path)
+
+
+class BlueprintsResource(BaseResource):
+    _path = "blueprints"
+
+    def list(self, limit: int = 20, offset: int = 0, category: str = None,
+             tags: list = None, complexity: str = None) -> Dict:
+        params = {"limit": limit, "offset": offset}
+        if category:
+            params["category"] = category
+        if tags:
+            params["tags"] = ",".join(tags)
+        if complexity:
+            params["complexity"] = complexity
+        return self._client.get(self._path, params=params)
+
+    def get(self, blueprint_id: str) -> Dict:
+        return self._client.get(f"{self._path}/{blueprint_id}")
+
+    def get_by_slug(self, slug: str) -> Dict:
+        return self._client.get(f"{self._path}/slug/{slug}")
+
+    def match(self, query: str = None, tags: list = None, category: str = None,
+              complexity: str = None, limit: int = 5) -> Dict:
+        params = {"limit": limit}
+        if query:
+            params["query"] = query
+        if tags:
+            params["tags"] = ",".join(tags)
+        if category:
+            params["category"] = category
+        if complexity:
+            params["complexity"] = complexity
+        return self._client.get(f"{self._path}/match", params=params)
+
+    def create(self, **data) -> Dict:
+        return self._client.post(self._path, data=data)
+
+    def update(self, blueprint_id: str, **data) -> Dict:
+        return self._client.put(f"{self._path}/{blueprint_id}", data=data)
+
+    def delete(self, blueprint_id: str) -> Dict:
+        return self._client.delete(f"{self._path}/{blueprint_id}")

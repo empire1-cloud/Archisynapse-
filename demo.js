@@ -5,6 +5,7 @@ const { seed } = require('./src/seed');
 const transactionService = require('./src/services/transactionService');
 const customerService = require('./src/services/customerService');
 const payoutService = require('./src/services/payoutService');
+const blueprintService = require('./src/services/blueprintService');
 
 const hr = () => console.log('\n' + '='.repeat(72) + '\n');
 
@@ -99,7 +100,29 @@ const run = async () => {
   }
   hr();
 
-  // 10. Health check data
+  // 10. Blueprint Registry
+  console.log('>>> Blueprint Registry — Seeding\n');
+  blueprintService.seedBlueprints();
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints?limit=5\n');
+  const list = blueprintService.listBlueprints({ limit: 5 });
+  list.items.forEach(b => console.log(`  ${b.name.padEnd(38)} | ${b.complexity.padEnd(8)} | ${b.category}`));
+  console.log(`\n  ... ${list.total} total blueprints`);
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/match?tags=music,royalties&limit=3\n');
+  const matches = blueprintService.matchBlueprints({ tags: ['music', 'royalties'], limit: 3 });
+  console.log(`  Top matches: ${matches.map(b => b.name).join(', ')}`);
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/slug/creator-royalty-split\n');
+  const bp = blueprintService.getBlueprintBySlug('creator-royalty-split');
+  console.log(`  ${bp.name} — ${bp.description.slice(0, 80)}...`);
+  console.log(`  Best practices: ${bp.bestPractices.slice(0, 2).join(' | ')}`);
+  hr();
+
+  // 13. Health check data
   console.log('>>> GET /health\n');
   console.log(`  status: ok`);
   console.log(`  uptime: ${process.uptime().toFixed(2)}s`);
