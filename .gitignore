@@ -15,6 +15,7 @@ dist/
 build/
 *.js
 !src/**/*.js
+!demo.js
 !jest.config.js
 *.d.ts
 
