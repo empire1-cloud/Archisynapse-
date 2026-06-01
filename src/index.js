@@ -11,6 +11,7 @@ const transactionRoutes = require('./routes/transactions');
 const customerRoutes = require('./routes/customers');
 const payoutRoutes = require('./routes/payouts');
 const webhookRoutes = require('./routes/webhooks');
+const dashboardRoutes = require('./routes/dashboard');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,6 +55,7 @@ app.use('/api/v1/transactions', transactionRoutes);
 app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/payouts', payoutRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
+app.use('/api/v1/dashboard', dashboardRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
@@ -67,8 +69,11 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    logger.info(`Archisynapse API server running on port ${PORT}`);
+  const { seed } = require('./seed');
+  seed().then(() => {
+    app.listen(PORT, () => {
+      logger.info(`Archisynapse API server running on port ${PORT}`);
+    });
   });
 }
 

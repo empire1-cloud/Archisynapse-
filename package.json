@@ -14,6 +14,7 @@
     "migrate:rollback": "knex migrate:rollback",
     "seed": "knex seed:run",
     "build": "tsc",
+    "demo": "node demo.js",
     "docker:build": "docker build -t archisynapse-api:latest .",
     "docker:run": "docker run -p 3000:3000 archisynapse-api:latest"
   },

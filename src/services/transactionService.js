@@ -89,9 +89,20 @@ const refundTransaction = async ({ transactionId, amount, reason } = {}) => {
   return refund;
 };
 
+const updateTransactionStatus = (id, status) => {
+  const txn = transactions.get(id);
+  if (txn) {
+    txn.status = status;
+    txn.updated_at = new Date().toISOString();
+  }
+  return txn;
+};
+
 module.exports = {
   createTransaction,
   getTransaction,
   listTransactions,
-  refundTransaction
+  refundTransaction,
+  updateTransactionStatus,
+  transactions
 };

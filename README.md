@@ -4,6 +4,49 @@
 
 Archisynapse is a SaaS fintech platform designed to revolutionize payment processing with **10x faster settlements**, **50% lower fees**, and **enterprise-grade security**.
 
+## Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/empire1-cloud/Archisynapse-.git
+cd Archisynapse-
+npm install
+
+# Run the full demo (no database required)
+npm run demo
+
+# Start the API server
+npm start
+
+# API is live at http://localhost:3000
+curl http://localhost:3000/health
+curl http://localhost:3000/api/v1/dashboard \
+  -H "Authorization: Bearer sk_test_123456789"
+
+# Run tests
+npm test
+```
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| GET | `/ready` | Readiness probe |
+| GET | `/api/v1/dashboard` | Business metrics & KPIs |
+| POST | `/api/v1/transactions` | Create a transaction |
+| GET | `/api/v1/transactions` | List transactions |
+| GET | `/api/v1/transactions/:id` | Get a transaction |
+| POST | `/api/v1/transactions/:id/refunds` | Refund a transaction |
+| POST | `/api/v1/customers` | Create a customer |
+| GET | `/api/v1/customers` | List customers |
+| GET | `/api/v1/customers/:id` | Get a customer |
+| GET | `/api/v1/payouts` | List payouts |
+| POST | `/api/v1/webhooks` | Receive webhook events |
+| GET | `/api/v1/webhooks` | List recent webhooks |
+
+All API endpoints require `Authorization: Bearer sk_xxx` header.
+
 ## 🎯 Mission
 
 Solve high fees ($2.9% + $0.30) and slow settlements (1–3 days) with a modern, AI-powered payment infrastructure built for scale.
@@ -125,4 +168,4 @@ Solve high fees ($2.9% + $0.30) and slow settlements (1–3 days) with a modern,
 
 ---
 
-**Status**: Under Development | **Last Updated**: May 2026
+**Status**: Beta — Demo Ready | **Last Updated**: June 2026
