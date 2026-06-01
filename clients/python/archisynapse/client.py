@@ -231,6 +231,22 @@ class BlueprintsResource(BaseResource):
             params["complexity"] = complexity
         return self._client.get(f"{self._path}/match", params=params)
 
+    def semantic_match(self, query: str = None, tags: list = None, category: str = None,
+                       complexity: str = None, limit: int = 5) -> Dict:
+        params = {"limit": limit}
+        if query:
+            params["query"] = query
+        if tags:
+            params["tags"] = ",".join(tags)
+        if category:
+            params["category"] = category
+        if complexity:
+            params["complexity"] = complexity
+        return self._client.get(f"{self._path}/semantic-match", params=params)
+
+    def embedding_info(self) -> Dict:
+        return self._client.get(f"{self._path}/embedding-info")
+
     def create(self, **data) -> Dict:
         return self._client.post(self._path, data=data)
 

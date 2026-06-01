@@ -204,4 +204,155 @@ describe('Blueprint Service', () => {
     const result = blueprintService.deleteBlueprint('nonexistent');
     expect(result).toBe(false);
   });
+
+  it('should generate embeddings for all seeded blueprints', () => {
+    const all = blueprintService.getAllBlueprints();
+    all.forEach(bp => {
+      expect(bp.embedding).toBeDefined();
+      expect(Array.isArray(bp.embedding)).toBe(true);
+      expect(bp.embedding.length).toBeGreaterThan(0);
+      expect(bp.embeddingModel).toBe('soulfire-embed-v1');
+      expect(bp.embeddingVersion).toBe('2026-06-01');
+    });
+  });
+
+  it('should auto-embed on create', () => {
+    const bp = blueprintService.createBlueprint({ name: 'Embed Test', tags: ['test'] });
+    expect(bp.embedding).toBeDefined();
+    expect(bp.embedding.length).toBeGreaterThan(0);
+  });
+
+  it('should auto-embed on update', () => {
+    const all = blueprintService.getAllBlueprints();
+    const bp = all[0];
+    const updated = blueprintService.updateBlueprint(bp.id, { description: 'Updated description for embedding test' });
+    expect(updated.embedding).toBeDefined();
+  });
+
+  it('should return embedding engine info', () => {
+    const info = blueprintService.getEmbeddingInfo();
+    expect(info.model).toBe('soulfire-embed-v1');
+    expect(info.indexed).toBeGreaterThan(0);
+    expect(info.dimensions).toBeGreaterThan(0);
+    expect(info.vocabularyTerms).toBeGreaterThan(0);
+  });
+
+  it('should semantic match by query', () => {
+    const results = blueprintService.semanticMatchBlueprints({
+      query: 'royalty music creator split',
+      limit: 3
+    });
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].score).toBeGreaterThan(0);
+    expect(results[0].embeddingSimilarity).toBeGreaterThan(0);
+    expect(results[0].blueprint).toBeDefined();
+  });
+
+  it('should semantic match with tags and scores', () => {
+    const results = blueprintService.semanticMatchBlueprints({
+      tags: ['royalties', 'music'],
+      limit: 3
+    });
+    expect(results.length).toBeGreaterThan(0);
+    results.forEach(r => {
+      expect(r.score).toBeDefined();
+      expect(r.embeddingSimilarity).toBeDefined();
+    });
+  });
+
+  it('should semantic match with category filter', () => {
+    const results = blueprintService.semanticMatchBlueprints({
+      query: 'subscription',
+      category: 'creator-economy',
+      limit: 5
+    });
+    results.forEach(r => {
+      expect(r.blueprint.category).toBe('creator-economy');
+    });
+  });
+
+  it('should hybrid match via matchBlueprints with embedding similarity', () => {
+    const results = blueprintService.matchBlueprints({
+      query: 'streaming royalties',
+      tags: ['royalties'],
+      limit: 3
+    });
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('should handle semantic match with no results gracefully', () => {
+    const results = blueprintService.semanticMatchBlueprints({
+      query: 'zzzzzzzznonexistent',
+      limit: 5
+    });
+    expect(Array.isArray(results)).toBe(true);
+  });
+});
+
+const { EmbeddingEngine, tokenize, cosineSimilarity, buildEmbeddingText } = require('../services/embeddingService');
+
+describe('Embedding Service', () => {
+  const testBps = [
+    { id: '1', name: 'Music Royalty Split', description: 'Split royalties for music creators', tags: ['music', 'royalty'], exampleUseCases: ['Artist payout'], components: ['Ledger'], bestPractices: ['Audit trail'] },
+    { id: '2', name: 'Payment Gateway', description: 'Process payments for ecommerce', tags: ['payment', 'gateway'], exampleUseCases: ['Checkout'], components: ['Processor'], bestPractices: ['PCI compliance'] },
+  ];
+
+  it('should build index and generate embeddings', () => {
+    const eng = new EmbeddingEngine();
+    eng.buildIndex(testBps);
+    expect(eng.vocabulary.length).toBeGreaterThan(0);
+    expect(eng.index.size).toBe(2);
+  });
+
+  it('should compute cosine similarity between related blueprints', () => {
+    const eng = new EmbeddingEngine();
+    eng.buildIndex(testBps);
+    const similar = eng.search('music artist royalty payout', 2);
+    expect(similar.length).toBe(2);
+    expect(similar[0].id).toBe('1');
+    expect(similar[0].score).toBeGreaterThan(similar[1].score);
+  });
+
+  it('should compute cosine similarity correctly', () => {
+    const a = new Float64Array([1, 0, 0]);
+    const b = new Float64Array([1, 0, 0]);
+    expect(cosineSimilarity(a, b)).toBeCloseTo(1.0, 5);
+    const c = new Float64Array([-1, 0, 0]);
+    expect(cosineSimilarity(a, c)).toBeCloseTo(-1.0, 5);
+    const d = new Float64Array([0, 1, 0]);
+    expect(cosineSimilarity(a, d)).toBeCloseTo(0, 5);
+  });
+
+  it('should upsert and remove from index', () => {
+    const eng = new EmbeddingEngine();
+    eng.buildIndex(testBps);
+    eng.upsert({ id: '3', name: 'Test Pattern', description: 'A test', tags: ['test'], exampleUseCases: [], components: [], bestPractices: [] });
+    expect(eng.index.size).toBe(3);
+    eng.remove('3');
+    expect(eng.index.size).toBe(2);
+  });
+
+  it('should generate embedding for arbitrary text', () => {
+    const eng = new EmbeddingEngine();
+    eng.buildIndex(testBps);
+    const vec = eng.generateEmbedding('custom query text');
+    expect(vec.length).toBe(eng.vocabulary.length);
+  });
+
+  it('should tokenize correctly with stop word removal', () => {
+    const tokens = tokenize('The quick brown fox jumps over the lazy dog');
+    expect(tokens.includes('the')).toBe(false);
+    expect(tokens.includes('quick')).toBe(true);
+    expect(tokens.includes('brown')).toBe(true);
+  });
+
+  it('should build embedding text from blueprint fields', () => {
+    const text = buildEmbeddingText({ name: 'Test', description: 'Desc', tags: ['a', 'b'], exampleUseCases: ['Case 1'], components: ['Comp 1'], bestPractices: ['Best 1'] });
+    expect(text).toContain('Test');
+    expect(text).toContain('Desc');
+    expect(text).toContain('a');
+    expect(text).toContain('Case 1');
+    expect(text).toContain('Comp 1');
+    expect(text).toContain('Best 1');
+  });
 });

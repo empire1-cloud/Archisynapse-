@@ -120,6 +120,17 @@ const run = async () => {
   const bp = blueprintService.getBlueprintBySlug('creator-royalty-split');
   console.log(`  ${bp.name} — ${bp.description.slice(0, 80)}...`);
   console.log(`  Best practices: ${bp.bestPractices.slice(0, 2).join(' | ')}`);
+
+  if (bp.embedding) {
+    console.log(`  Embedding: ${bp.embedding.length}-dim ${bp.embeddingModel} v${bp.embeddingVersion}`);
+  }
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/semantic-match?query=real-time+event+driven+payout\n');
+  const semantic = blueprintService.semanticMatchBlueprints({ query: 'real-time event driven payout', limit: 3 });
+  semantic.forEach((s, i) => {
+    console.log(`  ${i + 1}. ${s.blueprint.name.padEnd(38)} score=${s.score.toFixed(4)}  emb=${s.embeddingSimilarity.toFixed(4)}  tag=${s.tagScore.toFixed(2)}  txt=${s.textScore.toFixed(1)}`);
+  });
   hr();
 
   // 13. Health check data
