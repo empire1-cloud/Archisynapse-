@@ -14,7 +14,8 @@ pnpm-debug.log*
 dist/
 build/
 *.js
-!webpack.config.js
+!src/**/*.js
+!jest.config.js
 *.d.ts
 
 # IDE
