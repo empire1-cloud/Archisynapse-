@@ -16,7 +16,7 @@ from .errors import (
 
 
 class ArchisynapseClient:
-    BASE_URL = "http://localhost:3000/api/v1"
+    BASE_URL = "https://archisynapse-production.up.railway.app/api/v1"
 
     def __init__(
         self,
@@ -246,6 +246,55 @@ class BlueprintsResource(BaseResource):
 
     def embedding_info(self) -> Dict:
         return self._client.get(f"{self._path}/embedding-info")
+
+    # -- Knowledge Graph (v0.3) --
+
+    def graph_info(self) -> Dict:
+        return self._client.get(f"{self._path}/graph/info")
+
+    def graph_node(self, blueprint_id: str) -> Dict:
+        return self._client.get(f"{self._path}/graph/node/{blueprint_id}")
+
+    def graph_edges(self, blueprint_id: str) -> Dict:
+        return self._client.get(f"{self._path}/graph/edges/{blueprint_id}")
+
+    def graph_related(self, blueprint_id: str, limit: int = 5,
+                      min_confidence: float = 0.3) -> Dict:
+        params = {"limit": limit, "minConfidence": min_confidence}
+        return self._client.get(f"{self._path}/graph/related/{blueprint_id}", params=params)
+
+    def graph_recommendations(self, seeds: list, limit: int = 5,
+                              min_confidence: float = 0.2) -> Dict:
+        params = {
+            "seeds": ",".join(seeds),
+            "limit": limit,
+            "minConfidence": min_confidence,
+        }
+        return self._client.get(f"{self._path}/graph/recommendations", params=params)
+
+    def graph_bundle(self, blueprint_ids: list, name: str = None,
+                     description: str = None) -> Dict:
+        params = {"ids": ",".join(blueprint_ids)}
+        if name:
+            params["name"] = name
+        if description:
+            params["description"] = description
+        return self._client.get(f"{self._path}/graph/bundle", params=params)
+
+    def add_graph_edge(self, from_id: str, to_id: str, edge_type: str,
+                       confidence: float = 0.8, source: str = "manual",
+                       metadata: Dict = None) -> Dict:
+        return self._client.post(f"{self._path}/graph/edges", data={
+            "fromId": from_id,
+            "toId": to_id,
+            "type": edge_type,
+            "confidence": confidence,
+            "source": source,
+            "metadata": metadata or {},
+        })
+
+    def remove_graph_edge(self, edge_id: str) -> Dict:
+        return self._client.delete(f"{self._path}/graph/edges/{edge_id}")
 
     def create(self, **data) -> Dict:
         return self._client.post(self._path, data=data)

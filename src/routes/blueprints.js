@@ -43,6 +43,65 @@ router.get('/embedding-info', (req, res) => {
   res.json(blueprintService.getEmbeddingInfo());
 });
 
+router.get('/graph/info', (req, res) => {
+  res.json(blueprintService.getGraphInfo());
+});
+
+router.get('/graph/node/:id', (req, res) => {
+  const result = blueprintService.getGraphNode(req.params.id);
+  if (!result) return res.status(404).json({ error: 'Blueprint not found' });
+  res.json(result);
+});
+
+router.get('/graph/edges/:id', (req, res) => {
+  const result = blueprintService.getGraphEdges(req.params.id);
+  if (!result) return res.status(404).json({ error: 'Blueprint not found' });
+  res.json(result);
+});
+
+router.get('/graph/related/:id', (req, res) => {
+  const { limit, minConfidence } = req.query;
+  const result = blueprintService.getGraphRelated(req.params.id, {
+    limit: limit ? parseInt(limit, 10) : 5,
+    minConfidence: minConfidence ? parseFloat(minConfidence) : 0.3,
+  });
+  if (!result) return res.status(404).json({ error: 'Blueprint not found' });
+  res.json({ items: result });
+});
+
+router.get('/graph/recommendations', (req, res) => {
+  const { seeds, limit, minConfidence } = req.query;
+  if (!seeds) return res.status(400).json({ error: 'seeds parameter required (comma-separated ids)' });
+  const seedIds = seeds.split(',').map(s => s.trim());
+  const result = blueprintService.getGraphRecommendations(seedIds, {
+    limit: limit ? parseInt(limit, 10) : 5,
+    minConfidence: minConfidence ? parseFloat(minConfidence) : 0.2,
+  });
+  res.json({ items: result });
+});
+
+router.get('/graph/bundle', (req, res) => {
+  const { ids, name, description } = req.query;
+  if (!ids) return res.status(400).json({ error: 'ids parameter required (comma-separated blueprint ids)' });
+  const blueprintIds = ids.split(',').map(s => s.trim());
+  const result = blueprintService.getGraphBundle(blueprintIds, { name, description });
+  res.json(result);
+});
+
+router.post('/graph/edges', (req, res) => {
+  const { fromId, toId, type, confidence, source, metadata } = req.body;
+  if (!fromId || !toId || !type) return res.status(400).json({ error: 'fromId, toId, and type are required' });
+  const edge = blueprintService.addGraphEdge({ fromId, toId, type, confidence, source, metadata });
+  if (!edge) return res.status(404).json({ error: 'One or both blueprints not found' });
+  res.status(201).json(edge);
+});
+
+router.delete('/graph/edges/:edgeId', (req, res) => {
+  const ok = blueprintService.removeGraphEdge(req.params.edgeId);
+  if (!ok) return res.status(404).json({ error: 'Edge not found' });
+  res.json({ success: true });
+});
+
 router.get('/slug/:slug', (req, res) => {
   const { slug } = req.params;
   const bp = blueprintService.getBlueprintBySlug(slug);

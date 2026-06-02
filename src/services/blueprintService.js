@@ -1,7 +1,9 @@
 const { v4: uuidv4 } = require('uuid');
 const { EmbeddingEngine, buildEmbeddingText } = require('./embeddingService');
+const { GraphEngine, EDGE_TYPES } = require('./graphService');
 
 const engine = new EmbeddingEngine();
+const graph = new GraphEngine();
 let blueprints = [];
 
 function toSlug(name) {
@@ -32,6 +34,35 @@ const seedBlueprintData = [
   buildBlueprint({ name: 'Event-Driven Settlement', description: 'Settling balances and payouts based on domain events rather than fixed schedules.', tags: ['event-driven', 'settlement', 'streaming', 'ledger', 'real-time'], inputs: ['domainEvents', 'settlementRules', 'ledgerState'], outputs: ['settlementEvents', 'payoutInstructions'], scoreWeights: { 'event-driven': 2.0, settlement: 2.0, ledger: 1.5 }, exampleUseCases: ['Instant settlement after a live show or stream', 'Usage-based billing with near real-time payouts'], components: ['Event bus', 'Settlement rules engine', 'Ledger service', 'Archisynapse payout executor'], metrics: ['Settlement latency', 'Reconciliation error rate', 'Event processing throughput'], bestPractices: ['Design events to be immutable and idempotent.', 'Separate event ingestion from settlement execution.', 'Continuously reconcile ledger state against external systems.'], complexity: 'high' })
 ];
 
+const seedEdges = [
+  { from: 'creator-royalty-split', to: 'micro-royalty-streaming', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.85, source: 'manual' },
+  { from: 'creator-royalty-split', to: 'compliance-aware-routing', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.70, source: 'manual' },
+  { from: 'ai-music-generation-pipeline', to: 'digital-asset-provenance', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.80, source: 'manual' },
+  { from: 'ai-music-generation-pipeline', to: 'attribution-graph-pattern', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.75, source: 'manual' },
+  { from: 'micro-royalty-streaming', to: 'event-driven-settlement', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.90, source: 'manual' },
+  { from: 'micro-royalty-streaming', to: 'compliance-aware-routing', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.65, source: 'manual' },
+  { from: 'micro-royalty-streaming', to: 'creator-subscription-model', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.60, source: 'manual' },
+  { from: 'event-driven-settlement', to: 'marketplace-escrow-pattern', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.70, source: 'manual' },
+  { from: 'compliance-aware-routing', to: 'marketplace-escrow-pattern', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.75, source: 'manual' },
+  { from: 'digital-asset-provenance', to: 'attribution-graph-pattern', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.85, source: 'manual' },
+  { from: 'creator-subscription-model', to: 'creator-royalty-split', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.75, source: 'manual' },
+  { from: 'multi-agent-workflow', to: 'ai-music-generation-pipeline', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.65, source: 'manual' },
+  { from: 'creator-royalty-split', to: 'micro-royalty-streaming', type: EDGE_TYPES.PREREQUISITE_FOR, confidence: 0.80, source: 'manual' },
+  { from: 'attribution-graph-pattern', to: 'digital-asset-provenance', type: EDGE_TYPES.REQUIRES, confidence: 0.70, source: 'manual' },
+  { from: 'event-driven-settlement', to: 'micro-royalty-streaming', type: EDGE_TYPES.ALTERNATIVE_TO, confidence: 0.50, source: 'manual' },
+  { from: 'creator-subscription-model', to: 'creator-royalty-split', type: EDGE_TYPES.REQUIRES, confidence: 0.60, source: 'manual' },
+  { from: 'micro-royalty-streaming', to: 'event-driven-settlement', type: EDGE_TYPES.EXTENDS, confidence: 0.70, source: 'manual' },
+  { from: 'ai-music-generation-pipeline', to: 'multi-agent-workflow', type: EDGE_TYPES.EXTENDS, confidence: 0.60, source: 'manual' },
+  { from: 'marketplace-escrow-pattern', to: 'compliance-aware-routing', type: EDGE_TYPES.EXTENDS, confidence: 0.65, source: 'manual' },
+  { from: 'creator-subscription-model', to: 'creator-royalty-split', type: EDGE_TYPES.RECOMMENDED_PAIRING, confidence: 0.80, source: 'manual' },
+  { from: 'micro-royalty-streaming', to: 'ai-music-generation-pipeline', type: EDGE_TYPES.RECOMMENDED_PAIRING, confidence: 0.70, source: 'manual' },
+  { from: 'attribution-graph-pattern', to: 'creator-royalty-split', type: EDGE_TYPES.ALTERNATIVE_TO, confidence: 0.30, source: 'manual' },
+];
+
+function findBpBySlug(slug) {
+  return blueprints.find(b => b.slug === slug);
+}
+
 function embedBlueprint(bp) {
   const text = buildEmbeddingText(bp);
   return {
@@ -41,12 +72,24 @@ function embedBlueprint(bp) {
   };
 }
 
+function syncGraphNode(bp) {
+  graph.addNode(bp);
+}
+
 function seedBlueprints() {
   if (blueprints.length > 0) return blueprints;
   blueprints = seedBlueprintData;
   engine.buildIndex(blueprints);
   for (const bp of blueprints) {
     Object.assign(bp, embedBlueprint(bp));
+    syncGraphNode(bp);
+  }
+  for (const edgeData of seedEdges) {
+    const fromBp = findBpBySlug(edgeData.from);
+    const toBp = findBpBySlug(edgeData.to);
+    if (fromBp && toBp) {
+      graph.addEdge({ ...edgeData, from: fromBp.id, to: toBp.id });
+    }
   }
   return blueprints;
 }
@@ -64,6 +107,7 @@ function createBlueprint(data) {
   Object.assign(bp, embedBlueprint(bp));
   blueprints.push(bp);
   engine.upsert(bp);
+  syncGraphNode(bp);
   return bp;
 }
 
@@ -78,6 +122,7 @@ function updateBlueprint(id, updates) {
   Object.assign(updated, embedBlueprint(updated));
   blueprints[idx] = updated;
   engine.upsert(updated);
+  syncGraphNode(updated);
   return updated;
 }
 
@@ -86,6 +131,7 @@ function deleteBlueprint(id) {
   if (idx === -1) return false;
   blueprints.splice(idx, 1);
   engine.remove(id);
+  graph.removeNode(id);
   return true;
 }
 
@@ -170,6 +216,9 @@ function semanticMatchBlueprints({ query, tags = [], category, complexity, limit
   for (const bp of candidates) bpMap[bp.id] = bp;
 
   const tagSet = new Set(tags.map(t => t.toLowerCase()));
+  const topSeedIds = semanticResults.slice(0, 3).map(r => r.id);
+  const candidateIds = candidates.map(b => b.id);
+  const connectivityScores = graph.getConnectivityScores(topSeedIds, candidateIds);
 
   const scored = semanticResults
     .filter(r => bpMap[r.id])
@@ -177,13 +226,14 @@ function semanticMatchBlueprints({ query, tags = [], category, complexity, limit
       const bp = bpMap[r.id];
       const tagS = tagSet.size > 0 ? tagScore(bp, [...tagSet]) : 0;
       const txtS = query ? textMatchScore(bp, query) : 0;
-      const score = 0.6 * r.score + 0.3 * tagS + 0.1 * txtS;
-      return { blueprint: bp, score, embeddingSimilarity: r.score, tagScore: tagS, textScore: txtS };
+      const graphS = connectivityScores[r.id] || 0;
+      const score = 0.5 * r.score + 0.2 * tagS + 0.2 * graphS + 0.1 * txtS;
+      return { blueprint: bp, score, embeddingSimilarity: r.score, tagScore: tagS, graphScore: graphS, textScore: txtS };
     });
 
   if (scored.length === 0) {
     const fallback = matchBlueprints({ query, tags, category, complexity, limit });
-    return fallback.map(bp => ({ blueprint: bp, score: 0, embeddingSimilarity: 0, tagScore: 0, textScore: 0 }));
+    return fallback.map(bp => ({ blueprint: bp, score: 0, embeddingSimilarity: 0, tagScore: 0, graphScore: 0, textScore: 0 }));
   }
 
   return scored.sort((a, b) => b.score - a.score).slice(0, limit);
@@ -193,9 +243,72 @@ function getEmbeddingInfo() {
   return engine.getInfo();
 }
 
+function getGraph() {
+  return graph;
+}
+
+function getGraphInfo() {
+  return graph.getInfo();
+}
+
+function getGraphNode(id) {
+  const bp = getBlueprintById(id);
+  if (!bp) return null;
+  return {
+    blueprint: bp,
+    node: graph.getNode(id),
+    edges: graph.getEdgesFrom(id),
+    incomingEdges: graph.getEdgesTo(id),
+  };
+}
+
+function getGraphEdges(id) {
+  if (!getBlueprintById(id)) return null;
+  return { from: graph.getEdgesFrom(id), to: graph.getEdgesTo(id) };
+}
+
+function getGraphRelated(id, { limit = 5, minConfidence = 0.3 } = {}) {
+  const related = graph.getRelated(id, { limit, minConfidence });
+  return related.map(r => ({
+    ...r,
+    blueprint: getBlueprintById(r.blueprintId),
+  })).filter(r => r.blueprint);
+}
+
+function getGraphRecommendations(seedIds, { limit = 5, minConfidence = 0.2 } = {}) {
+  const recommendations = graph.getRecommendations(seedIds, { limit, minConfidence });
+  return recommendations.map(r => ({
+    ...r,
+    blueprint: getBlueprintById(r.blueprintId),
+    sourceBlueprint: getBlueprintById(r.source),
+  })).filter(r => r.blueprint && r.sourceBlueprint);
+}
+
+function getGraphBundle(blueprintIds, { name, description } = {}) {
+  const bundle = graph.getBundle(blueprintIds, { name, description });
+  bundle.blueprints = bundle.blueprints.map(b => ({
+    ...b,
+    blueprint: getBlueprintById(b.id),
+  }));
+  return bundle;
+}
+
+function addGraphEdge({ fromId, toId, type, confidence = 0.8, source = 'manual', metadata = {} }) {
+  const fromBp = getBlueprintById(fromId);
+  const toBp = getBlueprintById(toId);
+  if (!fromBp || !toBp) return null;
+  return graph.addEdge({ from: fromId, to: toId, type, confidence, source, metadata });
+}
+
+function removeGraphEdge(edgeId) {
+  return graph.removeEdge(edgeId);
+}
+
 module.exports = {
   seedBlueprints, getAllBlueprints, getBlueprintById, getBlueprintBySlug,
   createBlueprint, updateBlueprint, deleteBlueprint,
   listBlueprints, getBlueprint, matchBlueprints, semanticMatchBlueprints,
-  getEmbeddingInfo
+  getEmbeddingInfo, getGraph, getGraphInfo, getGraphNode, getGraphEdges,
+  getGraphRelated, getGraphRecommendations, getGraphBundle,
+  addGraphEdge, removeGraphEdge,
 };

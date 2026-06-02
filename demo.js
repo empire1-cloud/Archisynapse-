@@ -133,14 +133,70 @@ const run = async () => {
   });
   hr();
 
-  // 13. Health check data
+  // 13. Knowledge Graph (v0.3)
+  console.log('>>> GET /api/v1/blueprints/graph/info — Knowledge Graph Stats\n');
+  const graphInfo = blueprintService.getGraphInfo();
+  console.log(`  Nodes: ${graphInfo.nodes}`);
+  console.log(`  Edges: ${graphInfo.edges}`);
+  console.log(`  Edge types: ${graphInfo.edgeTypes}`);
+  console.log(`  Edge breakdown: ${JSON.stringify(graphInfo.edgeTypeBreakdown)}`);
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/graph/node/micro-royalty-streaming\n');
+  const mrsBp = blueprintService.getBlueprintBySlug('micro-royalty-streaming');
+  const graphNode = blueprintService.getGraphNode(mrsBp.id);
+  console.log(`  ${graphNode.blueprint.name}`);
+  console.log(`  Outgoing edges: ${graphNode.edges.length}`);
+  graphNode.edges.forEach(e => {
+    const target = blueprintService.getBlueprintById(e.to);
+    console.log(`    → ${target ? target.name : e.to}  [${e.type}]  conf=${e.confidence}`);
+  });
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/graph/related/micro-royalty-streaming\n');
+  const related = blueprintService.getGraphRelated(mrsBp.id, { limit: 3 });
+  related.forEach((r, i) => {
+    console.log(`  ${i + 1}. ${r.blueprint.name.padEnd(35)} score=${r.score.toFixed(4)}  [${r.edgeType}]`);
+  });
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/graph/recommendations?seeds=creator-royalty-split\n');
+  const crsBp = blueprintService.getBlueprintBySlug('creator-royalty-split');
+  const recs = blueprintService.getGraphRecommendations([crsBp.id], { limit: 4 });
+  recs.forEach((r, i) => {
+    console.log(`  ${i + 1}. ${r.blueprint.name.padEnd(35)} score=${r.score.toFixed(4)}  (via ${r.sourceBlueprint.name})`);
+  });
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/graph/bundle — Architecture Bundle\n');
+  const eBp = blueprintService.getBlueprintBySlug('event-driven-settlement');
+  const bundle = blueprintService.getGraphBundle(
+    [crsBp.id, mrsBp.id, eBp.id],
+    { name: 'Real-Time Royalty Stack', description: 'Royalty splitting + streaming + event-driven settlement' }
+  );
+  console.log(`  Bundle: ${bundle.name}`);
+  console.log(`  Description: ${bundle.description}`);
+  bundle.blueprints.forEach(b => console.log(`    • ${b.blueprint.name}`));
+  console.log(`  Internal edges: ${bundle.edgeCount}`);
+  console.log(`  Avg connectivity: ${bundle.avgConnectivity}`);
+  hr();
+
+  console.log('>>> GET /api/v1/blueprints/semantic-match (graph-aware v0.3)\n');
+  const semanticV3 = blueprintService.semanticMatchBlueprints({ query: 'real-time event driven payout', limit: 5 });
+  semanticV3.forEach((s, i) => {
+    console.log(`  ${i + 1}. ${s.blueprint.name.padEnd(38)} score=${s.score.toFixed(4)}  emb=${s.embeddingSimilarity.toFixed(4)}  tag=${s.tagScore.toFixed(2)}  graph=${s.graphScore.toFixed(4)}  txt=${s.textScore.toFixed(1)}`);
+  });
+  hr();
+
+  // 14. Health check data
   console.log('>>> GET /health\n');
   console.log(`  status: ok`);
   console.log(`  uptime: ${process.uptime().toFixed(2)}s`);
   hr();
 
   console.log('DEMO COMPLETE — All systems operational.');
-  console.log('Archisynapse API is production-ready and fully functional.\n');
+  console.log('Archisynapse API is production-ready and fully functional.');
+  console.log('Blueprint Registry v0.3 — Knowledge Graph Layer is active.\n');
 };
 
 run().catch(err => {

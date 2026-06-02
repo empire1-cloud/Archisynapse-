@@ -289,6 +289,7 @@ describe('Blueprint Service', () => {
   });
 });
 
+const { GraphEngine, EDGE_TYPES, EDGE_TYPE_CONFIG } = require('../services/graphService');
 const { EmbeddingEngine, tokenize, cosineSimilarity, buildEmbeddingText } = require('../services/embeddingService');
 
 describe('Embedding Service', () => {
@@ -354,5 +355,280 @@ describe('Embedding Service', () => {
     expect(text).toContain('Case 1');
     expect(text).toContain('Comp 1');
     expect(text).toContain('Best 1');
+  });
+});
+
+describe('Graph Service', () => {
+  let g;
+
+  beforeEach(() => {
+    g = new GraphEngine();
+    g.addNode({ id: 'bp_a', slug: 'blueprint-a', name: 'Blueprint A', category: 'cat1', complexity: 'low', tags: ['tag1'] });
+    g.addNode({ id: 'bp_b', slug: 'blueprint-b', name: 'Blueprint B', category: 'cat1', complexity: 'medium', tags: ['tag2'] });
+    g.addNode({ id: 'bp_c', slug: 'blueprint-c', name: 'Blueprint C', category: 'cat2', complexity: 'high', tags: ['tag3'] });
+    g.addNode({ id: 'bp_d', slug: 'blueprint-d', name: 'Blueprint D', category: 'cat2', complexity: 'medium', tags: ['tag1', 'tag2'] });
+  });
+
+  it('should register nodes and retrieve them', () => {
+    expect(g.getNode('bp_a').name).toBe('Blueprint A');
+    expect(g.getNode('bp_b').slug).toBe('blueprint-b');
+    expect(g.getNode('nonexistent')).toBeNull();
+  });
+
+  it('should add edges between nodes', () => {
+    const edge = g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    expect(edge.id).toMatch(/^e_/);
+    expect(edge.type).toBe('often-used-with');
+    expect(edge.from).toBe('bp_a');
+    expect(edge.to).toBe('bp_b');
+  });
+
+  it('should create symmetric edges for symmetric types', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    const edgesFromA = g.getEdgesFrom('bp_a');
+    const edgesFromB = g.getEdgesFrom('bp_b');
+    expect(edgesFromA.length).toBe(1);
+    expect(edgesFromB.length).toBe(1);
+    expect(edgesFromA[0].to).toBe('bp_b');
+    expect(edgesFromB[0].to).toBe('bp_a');
+  });
+
+  it('should create asymmetric edges for non-symmetric types', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.PREREQUISITE_FOR, confidence: 0.8 });
+    const edgesFromA = g.getEdgesFrom('bp_a');
+    const edgesFromB = g.getEdgesFrom('bp_b');
+    expect(edgesFromA.length).toBe(1);
+    expect(edgesFromB.length).toBe(0);
+  });
+
+  it('should reject edges between non-existent nodes', () => {
+    expect(() => g.addEdge({ from: 'bp_a', to: 'nonexistent', type: EDGE_TYPES.OFTEN_USED_WITH })).toThrow();
+  });
+
+  it('should reject unknown edge types', () => {
+    expect(() => g.addEdge({ from: 'bp_a', to: 'bp_b', type: 'unknown-type' })).toThrow();
+  });
+
+  it('should remove edges', () => {
+    const edge = g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    const ok = g.removeEdge(edge.id);
+    expect(ok).toBe(true);
+    expect(g.getEdgesFrom('bp_a').length).toBe(0);
+  });
+
+  it('should traverse graph up to max depth', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    g.addEdge({ from: 'bp_b', to: 'bp_c', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.8 });
+    const results = g.traverse('bp_a', { maxDepth: 2 });
+    expect(results.length).toBe(2);
+    const nodeIds = results.map(r => r.nodeId).sort();
+    expect(nodeIds).toEqual(['bp_b', 'bp_c']);
+  });
+
+  it('should compute connectivity scores', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    g.addEdge({ from: 'bp_b', to: 'bp_c', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.8 });
+    const scores = g.getConnectivityScores(['bp_a'], ['bp_a', 'bp_b', 'bp_c', 'bp_d']);
+    expect(scores['bp_a']).toBeGreaterThan(0);
+    expect(scores['bp_b']).toBeGreaterThan(0);
+    expect(scores['bp_d']).toBe(0);
+  });
+
+  it('should return related blueprints ranked by score', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    g.addEdge({ from: 'bp_a', to: 'bp_c', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.5 });
+    const related = g.getRelated('bp_a');
+    expect(related.length).toBe(2);
+    expect(related[0].blueprintId).toBe('bp_b');
+    expect(related[0].score).toBeGreaterThan(related[1].score);
+  });
+
+  it('should filter related by minConfidence', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    g.addEdge({ from: 'bp_a', to: 'bp_c', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.2 });
+    const related = g.getRelated('bp_a', { minConfidence: 0.5 });
+    expect(related.length).toBe(1);
+    expect(related[0].blueprintId).toBe('bp_b');
+  });
+
+  it('should generate recommendations from seed nodes', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    g.addEdge({ from: 'bp_a', to: 'bp_c', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.7 });
+    const recs = g.getRecommendations(['bp_a']);
+    expect(recs.length).toBe(2);
+  });
+
+  it('should exclude seed nodes from recommendations', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    const recs = g.getRecommendations(['bp_a', 'bp_b']);
+    expect(recs.length).toBe(0);
+  });
+
+  it('should create bundles from blueprint sets', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    g.addEdge({ from: 'bp_b', to: 'bp_c', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.8 });
+    const bundle = g.getBundle(['bp_a', 'bp_b', 'bp_c'], { name: 'Test Bundle' });
+    expect(bundle.name).toBe('Test Bundle');
+    expect(bundle.blueprints.length).toBe(3);
+    expect(bundle.edgeCount).toBeGreaterThan(0);
+    expect(bundle.avgConnectivity).toBeGreaterThan(0);
+  });
+
+  it('should record usage and return co-occurrences', () => {
+    g.recordUsage('bp_a', 'bp_b');
+    g.recordUsage('bp_a', 'bp_b');
+    g.recordUsage('bp_a', 'bp_b');
+    g.recordUsage('bp_c', 'bp_d');
+    g.recordUsage('bp_c', 'bp_d');
+    const coocs = g.getCoOccurrences(2);
+    expect(coocs.length).toBe(2);
+    expect(coocs[0].count).toBe(3);
+  });
+
+  it('should remove nodes and their edges', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    g.removeNode('bp_a');
+    expect(g.getNode('bp_a')).toBeNull();
+    expect(g.getEdgesFrom('bp_a').length).toBe(0);
+    expect(g.getEdgesTo('bp_a').length).toBe(0);
+  });
+
+  it('should return graph info with stats', () => {
+    g.addEdge({ from: 'bp_a', to: 'bp_b', type: EDGE_TYPES.OFTEN_USED_WITH, confidence: 0.9 });
+    const info = g.getInfo();
+    expect(info.nodes).toBe(4);
+    expect(info.edges).toBeGreaterThan(0);
+    expect(info.edgeTypes).toBeGreaterThan(0);
+    expect(info.edgeTypeBreakdown).toBeDefined();
+  });
+});
+
+describe('Blueprint Service — Graph Integration', () => {
+  beforeEach(() => {
+    blueprintService.seedBlueprints();
+  });
+
+  it('should seed graph nodes for all blueprints', () => {
+    const info = blueprintService.getGraphInfo();
+    expect(info.nodes).toBeGreaterThanOrEqual(10);
+    expect(info.edges).toBeGreaterThan(0);
+  });
+
+  it('should get graph node with edges', () => {
+    const node = blueprintService.getGraphNode(
+      blueprintService.getBlueprintBySlug('creator-royalty-split').id
+    );
+    expect(node).not.toBeNull();
+    expect(node.blueprint).toBeDefined();
+    expect(node.edges.length).toBeGreaterThan(0);
+  });
+
+  it('should return null for non-existent graph node', () => {
+    const node = blueprintService.getGraphNode('nonexistent');
+    expect(node).toBeNull();
+  });
+
+  it('should get related blueprints ranked by score', () => {
+    const bp = blueprintService.getBlueprintBySlug('micro-royalty-streaming');
+    const related = blueprintService.getGraphRelated(bp.id, { limit: 3 });
+    expect(related.length).toBeGreaterThan(0);
+    expect(related[0].score).toBeGreaterThan(0);
+    expect(related[0].blueprint).toBeDefined();
+  });
+
+  it('should get graph recommendations from seeds', () => {
+    const bp = blueprintService.getBlueprintBySlug('creator-royalty-split');
+    const recs = blueprintService.getGraphRecommendations([bp.id], { limit: 3 });
+    expect(recs.length).toBeGreaterThan(0);
+    recs.forEach(r => {
+      expect(r.blueprint).toBeDefined();
+      expect(r.sourceBlueprint).toBeDefined();
+    });
+  });
+
+  it('should create a blueprint bundle', () => {
+    const bp1 = blueprintService.getBlueprintBySlug('creator-royalty-split');
+    const bp2 = blueprintService.getBlueprintBySlug('micro-royalty-streaming');
+    const bp3 = blueprintService.getBlueprintBySlug('event-driven-settlement');
+    const bundle = blueprintService.getGraphBundle([bp1.id, bp2.id, bp3.id], { name: 'Royalty Stack Bundle' });
+    expect(bundle.name).toBe('Royalty Stack Bundle');
+    expect(bundle.blueprints.length).toBe(3);
+    expect(bundle.edgeCount).toBeGreaterThan(0);
+  });
+
+  it('should include graph scores in semantic match results', () => {
+    const results = blueprintService.semanticMatchBlueprints({
+      query: 'real-time event driven payout',
+      limit: 5
+    });
+    expect(results.length).toBeGreaterThan(0);
+    results.forEach(r => {
+      expect(r.graphScore).toBeDefined();
+      expect(typeof r.graphScore).toBe('number');
+    });
+    const topResult = results[0];
+    expect(topResult.score).toBeGreaterThan(0);
+    expect(topResult.embeddingSimilarity).toBeGreaterThan(0);
+  });
+
+  it('should boost graph-connected blueprints in semantic scoring', () => {
+    const results = blueprintService.semanticMatchBlueprints({
+      query: 'music generation ai',
+      limit: 10
+    });
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('should add graph edge manually and verify', () => {
+    const bp1 = blueprintService.getBlueprintBySlug('creator-royalty-split');
+    const bp2 = blueprintService.getBlueprintBySlug('ai-music-generation-pipeline');
+    const edge = blueprintService.addGraphEdge({
+      fromId: bp1.id,
+      toId: bp2.id,
+      type: EDGE_TYPES.RECOMMENDED_PAIRING,
+      confidence: 0.5,
+    });
+    expect(edge).not.toBeNull();
+    expect(edge.type).toBe('recommended-pairing');
+    const edges = blueprintService.getGraphEdges(bp1.id);
+    expect(edges.from.some(e => e.to === bp2.id)).toBe(true);
+  });
+
+  it('should remove graph edge', () => {
+    const bp1 = blueprintService.getBlueprintBySlug('creator-royalty-split');
+    const bp2 = blueprintService.getBlueprintBySlug('micro-royalty-streaming');
+    const existingFrom = blueprintService.getGraphEdges(bp1.id).from;
+    const edgeToRemove = existingFrom.find(e => e.to === bp2.id);
+    if (edgeToRemove) {
+      const ok = blueprintService.removeGraphEdge(edgeToRemove.id);
+      expect(ok).toBe(true);
+      const updated = blueprintService.getGraphEdges(bp1.id);
+      expect(updated.from.some(e => e.id === edgeToRemove.id)).toBe(false);
+    }
+  });
+
+  it('should sync graph on blueprint create', () => {
+    const bp = blueprintService.createBlueprint({
+      name: 'Graph Test Pattern',
+      description: 'Testing graph sync',
+      tags: ['test']
+    });
+    const node = blueprintService.getGraphNode(bp.id);
+    expect(node).not.toBeNull();
+    expect(node.node.name).toBe('Graph Test Pattern');
+  });
+
+  it('should sync graph on blueprint delete', () => {
+    const bp = blueprintService.createBlueprint({ name: 'Delete From Graph', tags: ['test'] });
+    blueprintService.deleteBlueprint(bp.id);
+    const node = blueprintService.getGraphNode(bp.id);
+    expect(node).toBeNull();
+  });
+
+  it('should return graph info with correct stats', () => {
+    const info = blueprintService.getGraphInfo();
+    expect(info.nodes).toBeGreaterThan(0);
+    expect(info.edges).toBeGreaterThan(0);
+    expect(info.edgeTypes).toBeGreaterThan(0);
   });
 });
