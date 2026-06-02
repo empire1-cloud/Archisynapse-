@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useEffect } from "react"
 import { Blueprint, ArchComponent, ComponentType } from "@/types/architecture"
-import { Sparkles, TrendingUp, Shield, Zap, Cpu, Loader2, AlertTriangle, CheckCircle, RefreshCw, History, Sliders } from "lucide-react"
+import { Sparkles, TrendingUp, Shield, Zap, Cpu, Loader2, AlertTriangle, CheckCircle, RefreshCw, History, Sliders, BarChart } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { analyzeArchitecture } from "@/ai/flows/design-partner-flow"
@@ -10,30 +10,18 @@ import {
   runAgenticEvolution,
   analyzeBlueprint,
   applyActions,
+  snapshotMetrics,
   type DetectedIssue,
   type RepairAction,
   type EvolutionPreset,
   type ThresholdConfig,
   type EvolutionRecord,
 } from "@/ai/flows/agentic-evolution-flow"
-import { EvolutionConfirmDialog } from "./EvolutionConfirmDialog"
-
-const LOCALSTORAGE_KEY = "archisynapse-evolution-history"
-
-function loadHistory(): EvolutionRecord[] {
-  if (typeof window === "undefined") return []
-  try {
-    const raw = localStorage.getItem(LOCALSTORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
-}
-
-function saveHistory(records: EvolutionRecord[]) {
-  try { localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(records)) } catch {}
-}
+import { EvolutionConfirmDialog, type EvolutionActionItem } from "./EvolutionConfirmDialog"
+import { ResilienceScorecard } from "./ResilienceScorecard"
 
 const AGGRESSION_LEVELS: { value: ThresholdConfig["aggression"]; label: string; desc: string }[] = [
-  { value: "conservative", label: "Safe", desc: "Only critical failures & security gaps" },
+  { value: "safe", label: "Safe", desc: "Only critical failures & security gaps" },
   { value: "balanced", label: "Balanced", desc: "Medium+ severity, standard recommendations" },
   { value: "aggressive", label: "Aggressive", desc: "All issues, expand aggressively" },
 ]
@@ -55,8 +43,26 @@ export function SynapseInsights({ blueprint, onAddComponent, onUpdateBlueprint }
   const [history, setHistory] = useState<EvolutionRecord[]>([])
   const [showTimeline, setShowTimeline] = useState(false)
   const [showThresholds, setShowThresholds] = useState(false)
+  const [scorecardOpen, setScorecardOpen] = useState(false)
+  const [actionItems, setActionItems] = useState<EvolutionActionItem[]>([])
 
-  useEffect(() => { setHistory(loadHistory()) }, [])
+  useEffect(() => {
+    if (pendingAnalysis) {
+      setActionItems(pendingAnalysis.actions.map((a, i) => ({
+        id: i,
+        label: a.action === "reset" ? `Reset component` : a.action === "add" ? `Add ${a.componentName || ""}` : a.action,
+        component: a.componentName || a.componentType || "",
+        selected: true,
+      })))
+    }
+  }, [pendingAnalysis])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("evolutionHistory")
+      if (raw) setHistory(JSON.parse(raw))
+    } catch {}
+  }, [])
 
   const handleAnalyze = async () => {
     setAnalyzing(true)
@@ -82,7 +88,9 @@ export function SynapseInsights({ blueprint, onAddComponent, onUpdateBlueprint }
 
   const handleConfirmEvolution = (selectedActions: RepairAction[]) => {
     if (!pendingAnalysis) return
+    const before = snapshotMetrics(blueprint.components)
     const updated = applyActions(blueprint, selectedActions)
+    const after = snapshotMetrics(updated.components)
     onUpdateBlueprint(updated)
     setEvolutionLog({ issues: pendingAnalysis.issues, actions: selectedActions })
 
@@ -97,10 +105,18 @@ export function SynapseInsights({ blueprint, onAddComponent, onUpdateBlueprint }
         a.action === "reset" ? `Reset failed component` :
         a.action === "add" ? `Added ${a.componentName}` : a.action
       ),
+      before,
+      after,
+      delta: {
+        roi: after.avgROI - before.avgROI,
+        risk: before.totalRisk - after.totalRisk,
+        debt: before.totalDebt - after.totalDebt,
+        health: after.healthyCount - before.healthyCount,
+      },
     }
     const updatedHistory = [record, ...history].slice(0, 20)
     setHistory(updatedHistory)
-    saveHistory(updatedHistory)
+    try { localStorage.setItem("evolutionHistory", JSON.stringify(updatedHistory)) } catch {}
 
     setPendingAnalysis(null)
   }
@@ -172,6 +188,9 @@ export function SynapseInsights({ blueprint, onAddComponent, onUpdateBlueprint }
           <Sparkles size={12} /> Synapse Engine
         </h3>
         <div className="flex gap-1">
+          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => setScorecardOpen(true)}>
+            <BarChart size={12} className="text-muted-foreground hover:text-accent" />
+          </Button>
           <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => setShowThresholds(!showThresholds)}>
             <Sliders size={12} className={cn(showThresholds ? "text-accent" : "text-muted-foreground")} />
           </Button>
@@ -320,6 +339,25 @@ export function SynapseInsights({ blueprint, onAddComponent, onUpdateBlueprint }
                     <span className="text-[8px] text-emerald-400/60 bg-emerald-500/5 px-1.5 py-0.5 rounded">{rec.actions} actions</span>
                     <span className="text-[8px] text-muted-foreground/40 bg-white/5 px-1.5 py-0.5 rounded">{rec.aggression}</span>
                   </div>
+                  {rec.delta && (
+                    <div className="flex gap-1.5 mb-1">
+                      {rec.delta.roi !== 0 && (
+                        <span className={cn("text-[8px] px-1.5 py-0.5 rounded font-mono", rec.delta.roi > 0 ? "text-emerald-400/80 bg-emerald-500/5" : "text-red-400/80 bg-red-500/5")}>
+                          ROI {rec.delta.roi > 0 ? "+" : ""}{rec.delta.roi}%
+                        </span>
+                      )}
+                      {rec.delta.risk !== 0 && (
+                        <span className={cn("text-[8px] px-1.5 py-0.5 rounded font-mono", rec.delta.risk > 0 ? "text-emerald-400/80 bg-emerald-500/5" : "text-red-400/80 bg-red-500/5")}>
+                          Risk {rec.delta.risk > 0 ? "-" : "+"}{Math.abs(rec.delta.risk)}
+                        </span>
+                      )}
+                      {rec.delta.health !== 0 && (
+                        <span className={cn("text-[8px] px-1.5 py-0.5 rounded font-mono", rec.delta.health > 0 ? "text-emerald-400/80 bg-emerald-500/5" : "text-red-400/80 bg-red-500/5")}>
+                          Health {rec.delta.health > 0 ? "+" : ""}{rec.delta.health}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {rec.actionSummaries.length > 0 && (
                     <div className="space-y-0.5">
                       {rec.actionSummaries.map((s, i) => (
@@ -334,12 +372,28 @@ export function SynapseInsights({ blueprint, onAddComponent, onUpdateBlueprint }
         </div>
       )}
 
+      <ResilienceScorecard
+        open={scorecardOpen}
+        onOpenChange={setScorecardOpen}
+        currentBlueprint={blueprint.components.length > 0 ? {
+          avgROI: Math.round(blueprint.components.reduce((a, c) => a + c.roiScore, 0) / blueprint.components.length),
+          totalRisk: blueprint.components.reduce((a, c) => a + c.riskScore, 0),
+          healthyCount: blueprint.components.filter(c => c.status === "healthy").length,
+        } : undefined}
+      />
+
       <EvolutionConfirmDialog
         open={confirmOpen}
-        onOpenChange={setConfirmOpen}
         issues={pendingAnalysis?.issues || []}
-        actions={pendingAnalysis?.actions || []}
-        onConfirm={handleConfirmEvolution}
+        actions={actionItems}
+        onToggleAction={(id) => setActionItems(prev => prev.map(a => a.id === id ? { ...a, selected: !a.selected } : a))}
+        onClose={() => { setConfirmOpen(false); setPendingAnalysis(null) }}
+        onApply={() => {
+          if (!pendingAnalysis) return
+          const selected = actionItems.filter(a => a.selected).map(a => pendingAnalysis.actions[a.id])
+          handleConfirmEvolution(selected)
+          setConfirmOpen(false)
+        }}
       />
     </div>
   )
