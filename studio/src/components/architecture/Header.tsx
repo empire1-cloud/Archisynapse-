@@ -1,6 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
+import { Tooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FileText, Sparkles, Scale, TrendingUp, Loader2, Zap, Vault } from "lucide-react"
 
@@ -58,19 +59,27 @@ export function Header({ blueprintName, onSave, onGenerate, onBriefing, onCompar
         </div>
         <div className="h-4 w-px bg-white/10" />
         <div className="flex items-center gap-1.5">
-          <Button variant="ghost" size="sm" onClick={onGenerate} className="text-[9px]">
-            <Sparkles size={12} className="mr-1" /> New Strategy
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onBriefing} disabled={isGeneratingBriefing} className="text-[9px]">
-            {isGeneratingBriefing ? <Loader2 size={12} className="animate-spin mr-1" /> : <FileText size={12} className="mr-1" />}
-            Board Briefing
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onCompare} className="text-[9px]">
-            <Scale size={12} className="mr-1" /> Compare
-          </Button>
-          <Button variant="glass" size="sm" onClick={onSave} className="text-[9px]">
-            <Vault size={12} className="mr-1" /> Vault
-          </Button>
+          <Tooltip content="Synthesize new blueprint from strategic goal">
+            <Button variant="ghost" size="sm" onClick={onGenerate} className="text-[9px]">
+              <Sparkles size={12} className="mr-1" /> New Strategy
+            </Button>
+          </Tooltip>
+          <Tooltip content="Generate executive board briefing">
+            <Button variant="ghost" size="sm" onClick={onBriefing} disabled={isGeneratingBriefing} className="text-[9px]">
+              {isGeneratingBriefing ? <Loader2 size={12} className="animate-spin mr-1" /> : <FileText size={12} className="mr-1" />}
+              Board Briefing
+            </Button>
+          </Tooltip>
+          <Tooltip content="Compare current vs vaulted strategy">
+            <Button variant="ghost" size="sm" onClick={onCompare} className="text-[9px]">
+              <Scale size={12} className="mr-1" /> Compare
+            </Button>
+          </Tooltip>
+          <Tooltip content="Save current design to vault">
+            <Button variant="glass" size="sm" onClick={onSave} className="text-[9px]">
+              <Vault size={12} className="mr-1" /> Vault
+            </Button>
+          </Tooltip>
         </div>
       </div>
     </header>

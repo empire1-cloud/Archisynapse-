@@ -3,6 +3,7 @@
 import { useRef, useCallback } from "react"
 import { ArchComponent } from "@/types/architecture"
 import { cn } from "@/lib/utils"
+import { Tooltip } from "@/components/ui/tooltip"
 import {
   Cpu, Shield, CreditCard, Key, ShieldCheck, Database, Zap,
   ArrowLeftRight, ChartColumn, BookOpen, Cloud, HardDrive, Network,
@@ -115,12 +116,14 @@ export function CanvasNode({ component, isSelected, onSelect, onRemove, onDrag, 
             )}
           </div>
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onRemove(component.id) }}
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <X size={14} className="text-muted-foreground hover:text-foreground" />
-        </button>
+        <Tooltip content="Remove component">
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(component.id) }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <X size={14} className="text-muted-foreground hover:text-foreground" />
+          </button>
+        </Tooltip>
       </div>
     </div>
   )

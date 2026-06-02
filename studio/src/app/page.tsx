@@ -13,6 +13,7 @@ import { SynapseInsights } from "@/components/architecture/SynapseInsights"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
@@ -298,7 +299,9 @@ export default function ArchisynapseApp() {
               </TabsList>
               <div className="flex-1 overflow-hidden">
                 <TabsContent value="registry" className="h-full m-0 p-0">
-                  <ComponentLibrary onAddComponent={handleAddComponent} />
+                  <ScrollArea className="h-full">
+                    <ComponentLibrary onAddComponent={handleAddComponent} />
+                  </ScrollArea>
                 </TabsContent>
                 <TabsContent value="synapse" className="h-full m-0 p-4">
                   <ScrollArea className="h-full">
@@ -320,9 +323,11 @@ export default function ArchisynapseApp() {
               </div>
             </Tabs>
           )}
-          <Button variant="ghost" size="icon" className="absolute -right-5 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full glass-panel z-30 border border-white/5 bg-background/60 backdrop-blur-xl group hover:bg-white/5" onClick={() => setLeftPanelOpen(!leftPanelOpen)}>
-            {leftPanelOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
-          </Button>
+          <Tooltip content={leftPanelOpen ? "Collapse Sidebar" : "Expand Sidebar"}>
+            <Button variant="ghost" size="icon" className="absolute -right-5 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full glass-panel z-30 border border-white/5 bg-background/60 backdrop-blur-xl group hover:bg-white/5" onClick={() => setLeftPanelOpen(!leftPanelOpen)}>
+              {leftPanelOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+            </Button>
+          </Tooltip>
         </aside>
 
         {/* Main Canvas */}
@@ -370,15 +375,21 @@ export default function ArchisynapseApp() {
               </div>
             )}
             <div className="flex gap-1.5">
-              <Button size="icon" variant="ghost" onClick={() => setIsSimulating(!isSimulating)} className={cn("rounded-full h-10 w-10", isSimulating ? "bg-accent/10 text-accent" : "hover:bg-white/5")}>
-                {isSimulating ? <Square size={16} /> : <Play size={16} />}
-              </Button>
-              <Button size="icon" variant="ghost" onClick={toggleChaos} className="rounded-full h-10 w-10 hover:bg-orange-500/10 hover:text-orange-400 transition-all">
-                <Flame size={16} />
-              </Button>
-              <Button size="icon" variant="ghost" onClick={runMarketSentinel} disabled={scanningMarket} className="rounded-full h-10 w-10 hover:bg-accent/10 hover:text-accent transition-all">
-                {scanningMarket ? <Loader2 size={16} className="animate-spin" /> : <Radar size={16} />}
-              </Button>
+              <Tooltip content={isSimulating ? "Stop Simulation" : "Start Simulation"}>
+                <Button size="icon" variant="ghost" onClick={() => setIsSimulating(!isSimulating)} className={cn("rounded-full h-10 w-10", isSimulating ? "bg-accent/10 text-accent" : "hover:bg-white/5")}>
+                  {isSimulating ? <Square size={16} /> : <Play size={16} />}
+                </Button>
+              </Tooltip>
+              <Tooltip content="Chaos Monkey \u2014 Inject Failure">
+                <Button size="icon" variant="ghost" onClick={toggleChaos} className="rounded-full h-10 w-10 hover:bg-orange-500/10 hover:text-orange-400 transition-all">
+                  <Flame size={16} />
+                </Button>
+              </Tooltip>
+              <Tooltip content="Market Sentinel \u2014 Scan Threats">
+                <Button size="icon" variant="ghost" onClick={runMarketSentinel} disabled={scanningMarket} className="rounded-full h-10 w-10 hover:bg-accent/10 hover:text-accent transition-all">
+                  {scanningMarket ? <Loader2 size={16} className="animate-spin" /> : <Radar size={16} />}
+                </Button>
+              </Tooltip>
             </div>
           </div>
         </main>
@@ -388,9 +399,11 @@ export default function ArchisynapseApp() {
           "glass-panel flex flex-col h-full z-20 transition-all duration-500 ease-in-out relative border-l border-white/5 bg-background/40 backdrop-blur-3xl",
           rightPanelOpen ? "w-96" : "w-0 overflow-hidden"
         )}>
-          <Button variant="ghost" size="icon" className="absolute -left-5 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full glass-panel z-30 border border-white/5 bg-background/60 backdrop-blur-xl hover:bg-white/5" onClick={() => setRightPanelOpen(!rightPanelOpen)}>
-            {rightPanelOpen ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-          </Button>
+          <Tooltip content={rightPanelOpen ? "Collapse Panel" : "Expand Panel"}>
+            <Button variant="ghost" size="icon" className="absolute -left-5 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full glass-panel z-30 border border-white/5 bg-background/60 backdrop-blur-xl hover:bg-white/5" onClick={() => setRightPanelOpen(!rightPanelOpen)}>
+              {rightPanelOpen ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            </Button>
+          </Tooltip>
           {rightPanelOpen && (
             <Tabs defaultValue="insights" className="flex flex-col h-full">
               <TabsList className="w-full justify-start rounded-none border-b border-white/5 bg-transparent h-14 px-8 gap-8">
@@ -398,10 +411,14 @@ export default function ArchisynapseApp() {
                 <TabsTrigger value="impact" className="h-14 rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent px-0 text-[10px] font-bold uppercase tracking-[0.2em] transition-all opacity-60 data-[state=active]:opacity-100">Risk Analysis</TabsTrigger>
               </TabsList>
               <TabsContent value="insights" className="flex-1 m-0 p-0 overflow-hidden">
-                <AIAnalysisPanel blueprint={blueprint} />
+                <ScrollArea className="h-full">
+                  <AIAnalysisPanel blueprint={blueprint} />
+                </ScrollArea>
               </TabsContent>
               <TabsContent value="impact" className="flex-1 m-0 p-0 overflow-hidden">
-                <DependencyAnalysisPanel blueprint={blueprint} />
+                <ScrollArea className="h-full">
+                  <DependencyAnalysisPanel blueprint={blueprint} />
+                </ScrollArea>
               </TabsContent>
             </Tabs>
           )}
