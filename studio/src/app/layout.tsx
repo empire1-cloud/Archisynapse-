@@ -1,10 +1,10 @@
 import type { Metadata } from "next"
+import { FirebaseClientProvider } from "@/components/FirebaseProvider"
 import "./globals.css"
 
 export const metadata: Metadata = {
   title: "Archisynapse | Elite Payment Architecture Studio",
-  description: "Design, analyze, and optimize global-scale payment infrastructure with AI-driven ROI insights. The Stripe for Emerging Markets drafting studio.",
-  icons: { icon: "/favicon.ico" },
+  description: "Design, analyze, and optimize global-scale payment infrastructure with AI-driven ROI insights.",
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-body antialiased bg-background text-foreground selection:bg-primary/30 selection:text-primary">
-        {children}
+        <FirebaseClientProvider>{children}</FirebaseClientProvider>
       </body>
     </html>
   )

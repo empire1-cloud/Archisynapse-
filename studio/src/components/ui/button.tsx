@@ -4,22 +4,22 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-2xl text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+        default: "bg-primary text-primary-foreground shadow hover:bg-primary/90 btn-high-end",
         destructive: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
-        outline: "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        outline: "border border-input bg-transparent shadow-sm hover:bg-accent hover:text-accent-foreground",
+        secondary: "bg-white/5 border border-white/10 text-foreground/80 hover:bg-white/10 btn-high-end",
+        ghost: "text-foreground/60 hover:bg-white/5 btn-high-end",
+        glow: "bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 btn-high-end",
       },
       size: {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-8",
-        icon: "h-9 w-9",
+        default: "h-11 px-6",
+        sm: "h-9 rounded-xl px-4 text-[9px]",
+        lg: "h-12 px-10",
+        icon: "h-11 w-11 p-0 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10",
       },
     },
     defaultVariants: { variant: "default", size: "default" },
@@ -37,5 +37,4 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   }
 )
 Button.displayName = "Button"
-
 export { Button, buttonVariants }
