@@ -38,3 +38,8 @@ Thumbs.db
 # Testing
 coverage/
 .nyc_output/
+
+# Local runtime state
+data/
+*.db
+files/
