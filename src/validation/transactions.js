@@ -4,13 +4,19 @@ const validateTransactionCreate = (req, res, next) => {
   const schema = Joi.object({
     amount: Joi.number().positive().required(),
     currency: Joi.string().length(3).default('USD'),
+    type: Joi.string().valid('payment', 'stream_royalty', 'stem_license', 'referral_passive', 'split', 'refund').optional(),
     description: Joi.string().optional(),
+    customerId: Joi.string().optional(),
+    idempotencyKey: Joi.string().required(),
     customer: Joi.object({
       id: Joi.string().required(),
       email: Joi.string().email().required()
     }).optional(),
     payment_method: Joi.object({
-      type: Joi.string().required()
+      type: Joi.string().valid('CARD', 'BANK_TRANSFER', 'WALLET', 'card', 'bank_transfer', 'wallet').required(),
+      token: Joi.string().required(),
+      last4: Joi.string().optional(),
+      brand: Joi.string().optional(),
     }).required(),
     metadata: Joi.object().optional()
   });

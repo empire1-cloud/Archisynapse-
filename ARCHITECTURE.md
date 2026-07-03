@@ -14,6 +14,8 @@ Archisynapse is built on a modern, scalable microservices architecture designed 
 - Process payment transactions
 - Handle transaction validation
 - Manage transaction status lifecycle
+- Store customer-facing payment state in `payments` and `refunds`
+- Discover succeeded-but-unposted payments for reconciliation retries
 
 **Performance**:
 - <100ms response time
@@ -57,6 +59,13 @@ Archisynapse is built on a modern, scalable microservices architecture designed 
 - Double-entry bookkeeping
 - Financial statement generation
 - Account reconciliation
+- Immutable journal entry history
+- Idempotent posting semantics with non-reusable ledger idempotency keys
+
+Boundary:
+- Transaction Service owns customer-facing payment lifecycle.
+- Ledger Service owns financial truth.
+- Payment success may precede ledger posting; reconciliation jobs retry any `SUCCEEDED` payment missing `ledger_transaction_id`.
 
 ### 6. Analytics Service
 

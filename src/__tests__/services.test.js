@@ -2,24 +2,39 @@ const transactionService = require('../services/transactionService');
 const customerService = require('../services/customerService');
 const payoutService = require('../services/payoutService');
 const blueprintService = require('../services/blueprintService');
+const db = require('../db');
+const { TransactionService, PaymentStatus } = require('../services/transactionService');
+
+beforeAll(async () => {
+  await db.migrate.latest();
+});
+
+afterAll(async () => {
+  await db.destroy();
+});
 
 describe('Transaction Service', () => {
   it('should create a transaction', async () => {
     const txn = await transactionService.createTransaction({
+      organizationId: `org_${Date.now()}`,
       amount: 1000,
       currency: 'USD',
-      payment_method: { type: 'card' }
+      idempotencyKey: `idem_${Date.now()}`,
+      payment_method: { type: 'CARD', token: 'tok_visa' }
     });
     expect(txn.id).toMatch(/^txn_/);
-    expect(txn.status).toBe('succeeded');
+    expect(txn.status).toBe(transactionService.PaymentStatus.SUCCEEDED);
     expect(txn.amount).toBe(1000);
+    expect(txn.ledgerTransactionId).toMatch(/^ldg_txn_/);
   });
 
   it('should get a transaction by id', async () => {
     const txn = await transactionService.createTransaction({
+      organizationId: `org_${Date.now()}`,
       amount: 500,
       currency: 'EUR',
-      payment_method: { type: 'card' }
+      idempotencyKey: `idem_${Date.now()}`,
+      payment_method: { type: 'CARD', token: 'tok_visa' }
     });
     const found = await transactionService.getTransaction(txn.id);
     expect(found).not.toBeNull();
@@ -32,7 +47,15 @@ describe('Transaction Service', () => {
   });
 
   it('should list transactions with pagination', async () => {
-    const result = await transactionService.listTransactions({ limit: 10, offset: 0 });
+    const organizationId = `org_${Date.now()}`;
+    await transactionService.createTransaction({
+      organizationId,
+      amount: 125,
+      currency: 'USD',
+      idempotencyKey: `idem_${Date.now()}`,
+      payment_method: { type: 'CARD', token: 'tok_visa' }
+    });
+    const result = await transactionService.listTransactions({ organizationId, limit: 10, offset: 0 });
     expect(result).toHaveProperty('data');
     expect(result).toHaveProperty('total');
     expect(result).toHaveProperty('limit');
@@ -42,16 +65,20 @@ describe('Transaction Service', () => {
 
   it('should refund a transaction', async () => {
     const txn = await transactionService.createTransaction({
+      organizationId: `org_${Date.now()}`,
       amount: 2000,
       currency: 'USD',
-      payment_method: { type: 'card' }
+      idempotencyKey: `idem_${Date.now()}`,
+      payment_method: { type: 'CARD', token: 'tok_visa' }
     });
     const refund = await transactionService.refundTransaction({
-      transactionId: txn.id
+      transactionId: txn.id,
+      reason: 'Customer requested refund',
+      idempotencyKey: `refund_${Date.now()}`,
     });
     expect(refund).toHaveProperty('id');
     expect(refund.amount).toBe(2000);
-    expect(refund.status).toBe('succeeded');
+    expect(refund.status).toBe(transactionService.PaymentStatus.SUCCEEDED);
   });
 
   it('should reject refund of non-existent transaction', async () => {
@@ -59,27 +86,163 @@ describe('Transaction Service', () => {
       transactionService.refundTransaction({ transactionId: 'nonexistent' })
     ).rejects.toThrow('Transaction not found');
   });
+
+  it('should surface succeeded-but-unposted payments for reconciliation', async () => {
+    const ledgerClient = {
+      ensureCoreAccounts: async () => ({
+        cashAccountId: 'acct_cash_stub',
+        revenueAccountId: 'acct_revenue_stub',
+      }),
+      postPaymentSucceeded: async () => {
+        throw new Error('ledger unavailable');
+      },
+      postRefund: async () => {
+        throw new Error('not used');
+      },
+    };
+
+    const service = new TransactionService(db, ledgerClient);
+    const organizationId = `org_${Date.now()}`;
+
+    const payment = await service.createPayment({
+      organizationId,
+      amount: 88,
+      currency: 'USD',
+      idempotencyKey: `idem_${Date.now()}`,
+      paymentMethod: { type: 'CARD', token: 'tok_visa' },
+      description: 'Needs reconciliation',
+    });
+
+    expect(payment.status).toBe(PaymentStatus.SUCCEEDED);
+    expect(payment.ledgerTransactionId).toBeNull();
+
+    const unposted = await service.findUnpostedPayments(organizationId);
+    expect(unposted.length).toBeGreaterThan(0);
+    expect(unposted.some((item) => item.id === payment.id)).toBe(true);
+  });
+
+  it('should retry an unposted payment into the ledger exactly once', async () => {
+    const failingLedgerClient = {
+      ensureCoreAccounts: async () => ({
+        cashAccountId: 'acct_cash_stub',
+        revenueAccountId: 'acct_revenue_stub',
+      }),
+      postPaymentSucceeded: async () => {
+        throw new Error('ledger unavailable');
+      },
+      postRefund: async () => {
+        throw new Error('not used');
+      },
+    };
+
+    const failingService = new TransactionService(db, failingLedgerClient);
+    const organizationId = `org_${Date.now()}`;
+
+    const created = await failingService.createPayment({
+      organizationId,
+      amount: 91,
+      currency: 'USD',
+      idempotencyKey: `idem_${Date.now()}`,
+      paymentMethod: { type: 'CARD', token: 'tok_visa' },
+      description: 'Retry later',
+    });
+
+    expect(created.ledgerTransactionId).toBeNull();
+
+    const successfulLedgerClient = {
+      ensureCoreAccounts: async () => ({
+        cashAccountId: 'acct_cash_retry',
+        revenueAccountId: 'acct_revenue_retry',
+      }),
+      postPaymentSucceeded: async () => ({
+        id: 'ldg_retry_once',
+      }),
+      postRefund: async () => {
+        throw new Error('not used');
+      },
+    };
+
+    const retryService = new TransactionService(db, successfulLedgerClient);
+    const firstRetry = await retryService.retryUnpostedPayment(organizationId, created.id);
+    const secondRetry = await retryService.retryUnpostedPayment(organizationId, created.id);
+
+    expect(firstRetry.ledgerTransactionId).toBe('ldg_retry_once');
+    expect(secondRetry.ledgerTransactionId).toBe('ldg_retry_once');
+  });
+
+  it('should collapse concurrent creates for the same idempotency key', async () => {
+    const organizationId = `org_${Date.now()}`;
+    const idempotencyKey = `idem_concurrent_${Date.now()}`;
+
+    const [first, second] = await Promise.all([
+      transactionService.createTransaction({
+        organizationId,
+        amount: 33,
+        currency: 'USD',
+        idempotencyKey,
+        payment_method: { type: 'CARD', token: 'tok_visa' }
+      }),
+      transactionService.createTransaction({
+        organizationId,
+        amount: 33,
+        currency: 'USD',
+        idempotencyKey,
+        payment_method: { type: 'CARD', token: 'tok_visa' }
+      }),
+    ]);
+
+    const rows = await db('payments')
+      .where({ organization_id: organizationId, idempotency_key: idempotencyKey });
+
+    expect(first.id).toBe(second.id);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('should allow different idempotency keys to create independent payments', async () => {
+    const organizationId = `org_${Date.now()}`;
+
+    const [first, second] = await Promise.all([
+      transactionService.createTransaction({
+        organizationId,
+        amount: 17,
+        currency: 'USD',
+        idempotencyKey: `idem_a_${Date.now()}`,
+        payment_method: { type: 'CARD', token: 'tok_visa' }
+      }),
+      transactionService.createTransaction({
+        organizationId,
+        amount: 17,
+        currency: 'USD',
+        idempotencyKey: `idem_b_${Date.now()}`,
+        payment_method: { type: 'CARD', token: 'tok_visa' }
+      }),
+    ]);
+
+    expect(first.id).not.toBe(second.id);
+  });
 });
 
 describe('Customer Service', () => {
   it('should create a customer', async () => {
+    const email = `test-${Date.now()}@example.com`;
     const customer = await customerService.createCustomer({
-      email: 'test@example.com',
+      email,
       name: 'John Doe'
     });
     expect(customer.id).toMatch(/^cus_/);
-    expect(customer.email).toBe('test@example.com');
+    expect(customer.email).toBe(email);
     expect(customer.name).toBe('John Doe');
   });
 
   it('should get a customer by id', async () => {
+    const email = `jane-${Date.now()}@example.com`;
     const c = await customerService.createCustomer({
-      email: 'jane@example.com',
+      email,
       name: 'Jane Doe'
     });
     const found = await customerService.getCustomer(c.id);
     expect(found).not.toBeNull();
-    expect(found.email).toBe('jane@example.com');
+    expect(found.email).toBe(email);
   });
 
   it('should return null for non-existent customer', async () => {

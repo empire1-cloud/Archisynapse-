@@ -9,6 +9,7 @@ router.post('/', authMiddleware, validateTransactionCreate, async (req, res, nex
   try {
     const transaction = await transactionService.createTransaction({
       ...req.body,
+      organizationId: req.organizationId,
       apiKey: req.apiKey
     });
     res.status(201).json(transaction);
@@ -40,6 +41,7 @@ router.get('/', authMiddleware, async (req, res, next) => {
   try {
     const { limit = 20, offset = 0, status } = req.query;
     const transactions = await transactionService.listTransactions({
+      organizationId: req.organizationId,
       limit: Math.min(parseInt(limit), 100),
       offset: parseInt(offset),
       status,
@@ -58,6 +60,7 @@ router.post('/:id/refunds', authMiddleware, async (req, res, next) => {
       transactionId: req.params.id,
       amount: req.body.amount,
       reason: req.body.reason,
+      idempotencyKey: req.body.idempotencyKey,
       apiKey: req.apiKey
     });
     res.status(201).json(refund);

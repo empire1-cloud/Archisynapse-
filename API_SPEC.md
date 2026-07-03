@@ -20,6 +20,8 @@ All requests require an API key in the `Authorization` header:
 Authorization: Bearer YOUR_API_KEY
 ```
 
+Ledger-backed payment requests are organization-scoped by the authenticated API key or JWT. A caller may send `X-Organization-ID`, but it must match the authenticated organization context or the request is rejected.
+
 ## Core Endpoints
 
 ### Transactions
@@ -30,11 +32,16 @@ Authorization: Bearer YOUR_API_KEY
 POST /transactions
 ```
 
+Notes:
+- `idempotencyKey` is required for payment creation.
+- Payment-method inputs must be tokenized only.
+- Ledger posting uses non-reusable idempotency keys: same key + same payload returns the original result, while same key + different payload is rejected.
+
 **Response (201 Created):**
 ```json
 {
   "id": "txn_7c4a1e9b",
-  "status": "succeeded",
+  "status": "SUCCEEDED",
   "amount": 1000,
   "currency": "USD",
   "created_at": "2026-05-29T12:34:56Z"
@@ -58,6 +65,8 @@ GET /transactions?limit=50&offset=0&status=succeeded
 ```http
 POST /transactions/{transaction_id}/refunds
 ```
+
+Refunds reverse the original ledger transaction through the ledger service boundary. If payment capture succeeds but ledger posting fails, the payment remains discoverable for reconciliation retry instead of being silently dropped.
 
 ### Customers
 
