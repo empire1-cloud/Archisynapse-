@@ -147,6 +147,26 @@ Archisynapse builds it into the architecture.
 
 ---
 
+🦠 Fraud MVP (`fraud-mvp/`)
+
+Python FastAPI risk scoring service with two detection domains:
+
+• **Checkout Risk** — card testing, IP velocity, country mismatches, BIN patterns
+• **Royalty Payout Risk** — DNA/soulprint verification, ledger checks, payout velocity
+
+Includes the **Empire Spine Receiver** — HMAC-signed event ingestion from Lyrica with digital birth certificate minting (SHA-256 seals) and verification.
+
+```bash
+cd fraud-mvp
+pip install -r requirements.txt
+uvicorn archisynapse_fraud_mvp:app --host 0.0.0.0 --port 8001
+```
+
+Endpoints: `POST /risk/checkout`, `POST /risk/royalty`, `POST /admin/merchants`, `POST /api/v1/events`, `GET /api/v1/certificates`, `GET /api/v1/certificates/{dna_tag}`
+
+
+---
+
 💰 Pricing
 
 SaaS Tiers
