@@ -57,7 +57,7 @@ async function getRecipientAccount(organizationId, accountId) {
 
 async function listRecipientAccounts(organizationId, { limit = 50, offset = 0 } = {}) {
   const query = db(ACCOUNT_TABLE).where({ organization_id: organizationId }).orderBy('created_at', 'desc');
-  const [{ count }] = await query.clone().count('* as count');
+  const [{ count }] = await query.clone().clearOrder().count('* as count');
   const rows = await query.clone().limit(Math.min(Number(limit), 100)).offset(Number(offset));
   return { data: rows.map(formatRecipientAccount), total: Number(count) };
 }
