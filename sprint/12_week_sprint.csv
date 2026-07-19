@@ -1,0 +1,12 @@
+week,epic,task,owner,est_days
+1,AI Blueprint,Finalize PRD and seed dataset,product,2
+1,AI Blueprint,Implement recommendation endpoint stub,backend,5
+1,AI Blueprint,Create anonymizer script,data,2
+2,Telemetry,Add telemetry helper and events,backend,3
+2,Telemetry,Instrument recommendation_generated in service,backend,2
+2,UI,Add recommendations panel in studio,frontend,5
+3,ML,Seed model training with 50 blueprints,ml,7
+3,Testing,Create supertest suite for recommendation endpoint,qa,3
+4,Marketplace,Stripe Connect plumbing,backend,8
+5,Legal,Prepare detailed patent packet and counsel handoff,legal,4
+6-12,Scale,Expand marketplace and onboarding,go-to-market,30
