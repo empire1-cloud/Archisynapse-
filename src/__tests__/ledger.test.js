@@ -320,7 +320,7 @@ describe('Ledger Integration', () => {
         transactionId: original.id,
         reason: 'Should rollback',
       })
-    ).rejects.toThrow(/blocked reverse update/i);
+    ).rejects.toThrow(isPostgres ? /chk_test_block_reverse_status/i : /blocked reverse update/i);
 
     const reversalRows = await db(ledgerService.TABLES.transactions)
       .where({ organization_id: organizationId, reference_id: original.id, type: 'REVERSAL' });
