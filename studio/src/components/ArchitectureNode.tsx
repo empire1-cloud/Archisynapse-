@@ -10,6 +10,11 @@ export interface CanvasComponent {
   type: string
   position: { x: number; y: number }
   status?: string
+  label?: string
+  subtitle?: string
+  metricLabel?: string
+  metricValue?: string
+  latencyMs?: number
 }
 
 interface ArchitectureNodeProps {
@@ -49,7 +54,7 @@ export function ArchitectureNode({ component, isSelected, onSelect, onRemove, on
   return (
     <div
       className={cn(
-        "absolute arch-node p-6 rounded-[2.5rem] border shadow-2xl cursor-move select-none min-w-[280px] transition-all duration-500",
+        "group absolute arch-node p-6 rounded-[2.5rem] border shadow-2xl cursor-move select-none min-w-[280px] transition-all duration-500",
         "bg-white/[0.03] backdrop-blur-2xl hover:shadow-[0_0_60px_rgba(0,242,255,0.08)]",
         isFailed ? "border-destructive/80 ring-8 ring-destructive/80 bg-destructive/30 animate-pulse" :
         isStandby ? "border-amber-500/50 ring-4 ring-amber-500/40" :
@@ -61,18 +66,38 @@ export function ArchitectureNode({ component, isSelected, onSelect, onRemove, on
     >
       <div className="flex items-start gap-4">
         {Icon && def && (
-          <div className={cn("h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 border", COMPONENT_COLORS[def.color])}>
-            <Icon className="h-5 w-5" />
+          <div className={cn("h-16 w-16 rounded-[1.75rem] flex items-center justify-center shrink-0 border", COMPONENT_COLORS[def.color])}>
+            <Icon className="h-7 w-7" />
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <h3 className="text-base font-semibold truncate">{def?.name || component.type}</h3>
+          <h3 className="text-[2rem] leading-none font-black tracking-tight truncate">
+            {component.label || def?.name || component.type}
+          </h3>
+          <div className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground mt-5">
+            {component.subtitle || def?.slug || component.type}
+          </div>
           {def && (
-            <span className={cn("text-[9px] font-black uppercase tracking-widest", STACK_COLORS[def.stack].split(" ")[0])}>
+            <span className={cn("text-[9px] font-black uppercase tracking-widest mt-4 inline-block", STACK_COLORS[def.stack].split(" ")[0])}>
               {def.stack}
             </span>
           )}
-          <div className="text-[10px] font-mono text-muted-foreground mt-0.5">{component.id.slice(0, 8)}</div>
+          <div className="mt-8 border-t border-dashed border-white/10 pt-8 flex items-end justify-between gap-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.35em] text-muted-foreground">
+                {component.metricLabel || "Yield"}
+              </div>
+              <div className="text-3xl font-heading font-bold text-primary mt-3">
+                {component.metricValue || "90%"}
+              </div>
+            </div>
+            {typeof component.latencyMs === "number" && (
+              <div className="rounded-full border border-primary/30 bg-primary/10 text-primary px-5 py-2 text-lg font-black">
+                {component.latencyMs}MS
+              </div>
+            )}
+          </div>
+          <div className="text-[10px] font-mono text-muted-foreground mt-5">{component.id.slice(0, 12)}</div>
         </div>
         <button onClick={(e) => { e.stopPropagation(); onRemove(component.id) }} className="opacity-0 group-hover:opacity-100 transition-opacity">
           <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />

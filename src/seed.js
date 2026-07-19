@@ -1,7 +1,11 @@
+const db = require('./db');
 const transactionService = require('./services/transactionService');
 const customerService = require('./services/customerService');
+const payoutService = require('./services/payoutService');
 const blueprintService = require('./services/blueprintService');
 const logger = require('./utils/logger');
+
+const SEED_ORGANIZATION_ID = 'org_demo';
 
 const CUSTOMERS = [
   { name: 'Acme Corp', email: 'billing@acmecorp.com', phone: '+1-555-0101', metadata: { industry: 'ecommerce', tier: 'professional' } },
@@ -11,25 +15,33 @@ const CUSTOMERS = [
   { name: 'NexGen Health', email: 'billing@nexgenhealth.org', phone: '+1-555-0105', metadata: { industry: 'healthcare', tier: 'enterprise' } },
   { name: 'DataFlow Analytics', email: 'finance@dataflow.com', phone: '+1-555-0106', metadata: { industry: 'analytics', tier: 'starter' } },
   { name: 'Skyline Retail', email: 'payments@skylineretail.com', phone: '+1-555-0107', metadata: { industry: 'retail', tier: 'professional' } },
-  { name: 'BlueOcean SaaS', email: 'billing@blueocean.dev', phone: '+1-555-0108', metadata: { industry: 'saas', tier: 'enterprise' } }
+  { name: 'BlueOcean SaaS', email: 'billing@blueocean.dev', phone: '+1-555-0108', metadata: { industry: 'saas', tier: 'enterprise' } },
 ];
 
 const TRANSACTIONS = [
-  { amount: 29900, currency: 'USD', description: 'Annual subscription - Pro plan', status: 'succeeded', customerIdx: 0 },
-  { amount: 5000, currency: 'USD', description: 'Top-up - Wallet credit', status: 'succeeded', customerIdx: 1 },
-  { amount: 150000, currency: 'USD', description: 'Enterprise license renewal', status: 'succeeded', customerIdx: 1 },
-  { amount: 4200, currency: 'EUR', description: 'Design assets package', status: 'succeeded', customerIdx: 2 },
-  { amount: 89000, currency: 'USD', description: 'Monthly logistics partnership', status: 'succeeded', customerIdx: 3 },
-  { amount: 1200, currency: 'GBP', description: 'API usage overage', status: 'failed', customerIdx: 0 },
-  { amount: 45000, currency: 'USD', description: 'Healthcare compliance package', status: 'succeeded', customerIdx: 4 },
-  { amount: 9900, currency: 'USD', description: 'Starter plan - Monthly', status: 'succeeded', customerIdx: 5 },
-  { amount: 75000, currency: 'USD', description: 'Q2 bulk processing fee', status: 'succeeded', customerIdx: 6 },
-  { amount: 120000, currency: 'EUR', description: 'Enterprise infrastructure fee', status: 'pending', customerIdx: 7 },
-  { amount: 3200, currency: 'USD', description: 'Additional API calls', status: 'succeeded', customerIdx: 2 },
-  { amount: 28000, currency: 'USD', description: 'Data export service', status: 'refunded', customerIdx: 5 },
-  { amount: 9500, currency: 'GBP', description: 'UK compliance processing', status: 'succeeded', customerIdx: 4 },
-  { amount: 67000, currency: 'USD', description: 'Monthly retainer', status: 'succeeded', customerIdx: 3 },
-  { amount: 1800, currency: 'USD', description: 'Test transaction - voided', status: 'failed', customerIdx: 0 }
+  { amount: 299.00, currency: 'USD', description: 'Annual subscription - Pro plan', status: 'SUCCEEDED', customerIdx: 0 },
+  { amount: 50.00, currency: 'USD', description: 'Top-up - Wallet credit', status: 'SUCCEEDED', customerIdx: 1 },
+  { amount: 1500.00, currency: 'USD', description: 'Enterprise license renewal', status: 'SUCCEEDED', customerIdx: 1 },
+  { amount: 42.00, currency: 'EUR', description: 'Design assets package', status: 'SUCCEEDED', customerIdx: 2 },
+  { amount: 890.00, currency: 'USD', description: 'Monthly logistics partnership', status: 'SUCCEEDED', customerIdx: 3 },
+  { amount: 12.00, currency: 'GBP', description: 'API usage overage', status: 'FAILED', customerIdx: 0 },
+  { amount: 450.00, currency: 'USD', description: 'Healthcare compliance package', status: 'SUCCEEDED', customerIdx: 4 },
+  { amount: 99.00, currency: 'USD', description: 'Starter plan - Monthly', status: 'SUCCEEDED', customerIdx: 5 },
+  { amount: 750.00, currency: 'USD', description: 'Q2 bulk processing fee', status: 'SUCCEEDED', customerIdx: 6 },
+  { amount: 1200.00, currency: 'EUR', description: 'Enterprise infrastructure fee', status: 'PENDING', customerIdx: 7 },
+  { amount: 32.00, currency: 'USD', description: 'Additional API calls', status: 'SUCCEEDED', customerIdx: 2 },
+  { amount: 280.00, currency: 'USD', description: 'Data export service', status: 'REFUNDED', customerIdx: 5 },
+  { amount: 95.00, currency: 'GBP', description: 'UK compliance processing', status: 'SUCCEEDED', customerIdx: 4 },
+  { amount: 670.00, currency: 'USD', description: 'Monthly retainer', status: 'SUCCEEDED', customerIdx: 3 },
+  { amount: 18.00, currency: 'USD', description: 'Test transaction - voided', status: 'FAILED', customerIdx: 0 },
+];
+
+const PAYOUTS = [
+  { amount: 5000.00, status: 'PAID', currency: 'USD', customerIdx: 0 },
+  { amount: 12000.00, status: 'PENDING', currency: 'USD', customerIdx: 1 },
+  { amount: 8000.00, status: 'PAID', currency: 'USD', customerIdx: 2 },
+  { amount: 20000.00, status: 'PROCESSING', currency: 'USD', customerIdx: 3 },
+  { amount: 3500.00, status: 'PAID', currency: 'USD', customerIdx: 4 },
 ];
 
 const seed = async () => {
@@ -41,23 +53,67 @@ const seed = async () => {
 
   for (const t of TRANSACTIONS) {
     const txn = await transactionService.createTransaction({
+      organizationId: SEED_ORGANIZATION_ID,
       amount: t.amount,
       currency: t.currency,
       description: t.description,
       customer: { id: customers[t.customerIdx].id, email: CUSTOMERS[t.customerIdx].email },
-      payment_method: { type: 'card' }
+      idempotencyKey: `seed_txn_${t.customerIdx}_${Math.round(t.amount * 100)}_${t.status.toLowerCase()}`,
+      payment_method: { type: 'CARD', token: `tok_seed_${t.customerIdx}` },
     });
 
-    if (t.status === 'refunded') {
-      await transactionService.refundTransaction({ transactionId: txn.id });
-    } else if (t.status !== 'succeeded') {
-      transactionService.updateTransactionStatus(txn.id, t.status);
+    if (t.status === 'REFUNDED') {
+      await transactionService.refundTransaction({
+        transactionId: txn.id,
+        idempotencyKey: `seed_refund_${t.customerIdx}_${Math.round(t.amount * 100)}`,
+      });
+    } else if (t.status !== 'SUCCEEDED') {
+      await transactionService.updateTransactionStatus(txn.id, t.status);
+    }
+  }
+
+  for (const [index, p] of PAYOUTS.entries()) {
+    const recipientAccount = await payoutService.registerRecipientAccount({
+      organizationId: SEED_ORGANIZATION_ID,
+      recipientId: customers[p.customerIdx].id,
+      processorAccountId: `acct_seed_${p.customerIdx}`,
+      currency: p.currency,
+    });
+    await payoutService.verifyRecipientAccount(SEED_ORGANIZATION_ID, recipientAccount.id);
+
+    const payout = await payoutService.createPayout({
+      organizationId: SEED_ORGANIZATION_ID,
+      recipientAccountId: recipientAccount.id,
+      amount: p.amount,
+      currency: p.currency,
+      scheduledFor: p.status === 'PENDING' || p.status === 'PROCESSING'
+        ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        : undefined,
+      idempotencyKey: `seed_payout_${index}_${Math.round(p.amount * 100)}`,
+      sourceType: 'MANUAL',
+      sourceReferenceId: `seed_payout_${index}`,
+      metadata: { seed: true },
+    });
+
+    if (p.status !== payout.status) {
+      const updatePayload = {
+        status: p.status,
+        processed_at: p.status === 'PAID' ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      };
+      if (p.status === 'PROCESSING') {
+        updatePayload.ledger_transaction_id = null;
+      }
+
+      await db('payouts')
+        .where({ id: payout.id })
+        .update(updatePayload);
     }
   }
 
   await blueprintService.seedBlueprints();
 
-  logger.info(`Seed complete: ${customers.length} customers, ${TRANSACTIONS.length} transactions`);
+  logger.info(`Seed complete: ${customers.length} customers, ${TRANSACTIONS.length} transactions, ${PAYOUTS.length} payouts`);
 };
 
 module.exports = { seed };

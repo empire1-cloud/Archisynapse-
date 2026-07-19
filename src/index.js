@@ -15,6 +15,7 @@ const webhookRoutes = require('./routes/webhooks');
 const dashboardRoutes = require('./routes/dashboard');
 const blueprintRoutes = require('./routes/blueprints');
 const ledgerRoutes = require('./routes/ledger');
+const riskRoutes = require('./routes/risk');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -71,6 +72,7 @@ app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/blueprints', blueprintRoutes);
 app.use('/api/v1/ledger', ledgerRoutes);
+app.use('/api/v1/risk', riskRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

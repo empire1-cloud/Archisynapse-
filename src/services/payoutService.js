@@ -1,9 +1,14 @@
 const db = require('../db');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
+const { AppError } = require('../middleware/errorHandler');
+const riskService = require('./riskService');
+const stripeGateway = require('./stripeGateway');
 
 const PAYOUT_TABLE = 'payouts';
 const ACCOUNT_TABLE = 'recipient_accounts';
+const MANUAL_REVIEW_FLAG = 'manualReviewRequired';
+const DELAY_PAYOUT_HOURS = 72;
 
 // ---------------------------------------------------------------------------
 // Recipient Accounts
@@ -71,6 +76,7 @@ async function createPayout({
   sourceType,
   sourceReferenceId,
   metadata,
+  riskContext,
 }) {
   const existing = await db(PAYOUT_TABLE).where({ idempotency_key: idempotencyKey }).first();
   if (existing) {
@@ -79,13 +85,35 @@ async function createPayout({
   }
 
   const account = await db(ACCOUNT_TABLE).where({ id: recipientAccountId, organization_id: organizationId }).first();
-  if (!account) throw new Error('Recipient account not found');
+  if (!account) {
+    throw new AppError('Recipient account not found', 404, 'not_found');
+  }
   if (account.status !== 'VERIFIED') {
-    throw new Error(`Recipient account is ${account.status}, not VERIFIED`);
+    throw new AppError(`Recipient account is ${account.status}, not VERIFIED`, 400, 'invalid_state');
+  }
+
+  const riskDecision = await evaluatePayoutRisk({
+    organizationId,
+    account,
+    amount,
+    currency,
+    sourceType,
+    sourceReferenceId,
+    idempotencyKey,
+    riskContext,
+  });
+
+  if (riskDecision?.decision === 'block_payout') {
+    throw new AppError(
+      `Payout blocked by risk policy: ${riskDecision.reasons.join(', ') || 'high_risk_signal'}`,
+      403,
+      'risk_blocked'
+    );
   }
 
   const id = uuidv4();
-  const scheduled = scheduledFor ? new Date(scheduledFor) : new Date();
+  const payoutMetadata = buildPayoutMetadata({ metadata, riskDecision });
+  const scheduled = determineScheduledFor({ scheduledFor, riskDecision });
   const [row] = await db(PAYOUT_TABLE)
     .insert({
       id,
@@ -98,11 +126,11 @@ async function createPayout({
       idempotency_key: idempotencyKey,
       source_type: sourceType,
       source_reference_id: sourceReferenceId || null,
-      metadata: JSON.stringify(metadata || {}),
+      metadata: JSON.stringify(payoutMetadata),
     })
     .returning('*');
 
-  if (scheduled.getTime() > Date.now() + 1000) {
+  if (scheduled.getTime() > Date.now() + 1000 || payoutMetadata[MANUAL_REVIEW_FLAG]) {
     return formatPayout(row);
   }
 
@@ -121,6 +149,9 @@ async function executePayout(organizationId, payoutId) {
   if (row.status !== 'PENDING') {
     logger.info({ payoutId, status: row.status }, 'Payout already processed, skipping');
     return formatPayout(row);
+  }
+  if (isManualReviewRequired(row.metadata)) {
+    throw new AppError('Payout requires manual review before release', 409, 'manual_review_required');
   }
 
   await db(PAYOUT_TABLE).where({ id: payoutId }).update({ status: 'PROCESSING' });
@@ -172,13 +203,14 @@ async function getPayout(organizationId, payoutId) {
 }
 
 async function listPayouts(organizationId, { limit = 50, cursor, status, recipientAccountId } = {}) {
-  let query = db(PAYOUT_TABLE).where({ organization_id: organizationId });
-  if (status) query = query.where({ status });
-  if (recipientAccountId) query = query.where({ recipient_account_id: recipientAccountId });
-  if (cursor) query = query.where('id', '<', cursor);
+  const normalized = normalizeListPayoutArgs(organizationId, { limit, cursor, status, recipientAccountId });
+  let query = db(PAYOUT_TABLE).where({ organization_id: normalized.organizationId });
+  if (normalized.status) query = query.where({ status: normalized.status });
+  if (normalized.recipientAccountId) query = query.where({ recipient_account_id: normalized.recipientAccountId });
+  if (normalized.cursor) query = query.where('id', '<', normalized.cursor);
 
   const [{ count }] = await query.clone().count('* as count');
-  const take = Math.min(Number(limit), 100);
+  const take = Math.min(Number(normalized.limit), 100);
   const rows = await query.orderBy('created_at', 'desc').orderBy('id', 'desc').limit(take + 1);
   const hasMore = rows.length > take;
   const data = hasMore ? rows.slice(0, take) : rows;
@@ -209,16 +241,56 @@ async function markPayoutReturned(organizationId, payoutId, reason) {
   return formatPayout(row);
 }
 
+async function releasePayoutManualReview(organizationId, payoutId, note) {
+  const row = await db(PAYOUT_TABLE)
+    .where({ id: payoutId, organization_id: organizationId })
+    .first();
+
+  if (!row) {
+    throw new AppError('Payout not found', 404, 'not_found');
+  }
+  if (row.status !== 'PENDING') {
+    throw new AppError('Only pending payouts can be released from manual review', 409, 'invalid_state');
+  }
+
+  const currentMetadata = parseMetadata(row.metadata);
+  if (!currentMetadata[MANUAL_REVIEW_FLAG]) {
+    throw new AppError('Payout is not currently held for manual review', 409, 'invalid_state');
+  }
+
+  const nextMetadata = {
+    ...currentMetadata,
+    [MANUAL_REVIEW_FLAG]: false,
+    manualReviewReleasedAt: new Date().toISOString(),
+    manualReviewReleaseNote: note || null,
+  };
+
+  await db(PAYOUT_TABLE)
+    .where({ id: payoutId, organization_id: organizationId })
+    .update({
+      metadata: JSON.stringify(nextMetadata),
+      scheduled_for: new Date(),
+      updated_at: new Date(),
+    });
+
+  return executePayout(organizationId, payoutId);
+}
+
 async function processScheduledPayouts(organizationId) {
   const due = await db(PAYOUT_TABLE)
     .where({ organization_id: organizationId, status: 'PENDING' })
     .where('scheduled_for', '<=', new Date())
     .orderBy('scheduled_for', 'asc')
-    .select('id');
+    .select('id', 'metadata');
 
   let processed = 0;
   let failed = 0;
   for (const row of due) {
+    if (isManualReviewRequired(row.metadata)) {
+      logger.warn({ payoutId: row.id }, 'Skipping payout held for manual review');
+      continue;
+    }
+
     try {
       const result = await executePayout(organizationId, row.id);
       if (result.status === 'PAID') processed++;
@@ -244,9 +316,22 @@ async function findUnpostedPayouts(organizationId) {
 // ---------------------------------------------------------------------------
 
 async function callProcessor({ processorAccountId, amount, currency }) {
-  // TODO: integrate real processor (Stripe Connect / bank rail).
-  // Stub always succeeds so the pipeline can be exercised end-to-end.
-  return { success: true, processorPayoutId: `po_${uuidv4()}` };
+  try {
+    return await stripeGateway.createTransfer({
+      destinationAccountId: processorAccountId,
+      amount: Number(amount),
+      currency,
+      description: 'Archisynapse payout transfer',
+      metadata: {
+        processor_account_id: processorAccountId,
+      },
+    });
+  } catch (error) {
+    return {
+      success: false,
+      failureMessage: error.message,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +342,128 @@ async function postToLedger({ organizationId, payoutId, amount, currency }) {
   // TODO: POST to Ledger Service when deployed. For now return a synthetic ref.
   logger.info({ organizationId, payoutId, amount, currency }, 'Ledger post (stub)');
   return { id: `ledger_${uuidv4()}`, status: 'POSTED' };
+}
+
+function buildPayoutMetadata({ metadata, riskDecision }) {
+  const nextMetadata = {
+    ...normalizeMetadataInput(metadata),
+  };
+
+  if (!riskDecision) {
+    return nextMetadata;
+  }
+
+  nextMetadata.riskDecision = {
+    id: riskDecision.id,
+    decision: riskDecision.decision,
+    riskScore: riskDecision.riskScore,
+    reasons: riskDecision.reasons,
+    createdAt: riskDecision.createdAt,
+  };
+
+  if (riskDecision.decision === 'hold_payout_review') {
+    nextMetadata[MANUAL_REVIEW_FLAG] = true;
+  }
+
+  if (riskDecision.decision === 'delay_payout_72h') {
+    nextMetadata.riskHoldWindowHours = DELAY_PAYOUT_HOURS;
+  }
+
+  return nextMetadata;
+}
+
+function determineScheduledFor({ scheduledFor, riskDecision }) {
+  const scheduled = scheduledFor ? new Date(scheduledFor) : new Date();
+
+  if (riskDecision?.decision !== 'delay_payout_72h') {
+    return scheduled;
+  }
+
+  const holdUntil = new Date(Date.now() + DELAY_PAYOUT_HOURS * 60 * 60 * 1000);
+  return scheduled > holdUntil ? scheduled : holdUntil;
+}
+
+async function evaluatePayoutRisk({
+  organizationId,
+  account,
+  amount,
+  currency,
+  sourceType,
+  sourceReferenceId,
+  idempotencyKey,
+  riskContext,
+}) {
+  if (!riskContext) {
+    return null;
+  }
+
+  const accountAgeDays = calculateAgeDays(account.created_at);
+  const normalizedRiskContext = stripUndefined({
+    userId: riskContext.userId,
+    creatorId: riskContext.creatorId || account.recipient_id,
+    trackId: riskContext.trackId,
+    deviceId: riskContext.deviceId,
+    email: riskContext.email,
+    sessionId: riskContext.sessionId,
+    payoutDestination: riskContext.payoutDestination || account.processor_account_id,
+    ipAddress: riskContext.ipAddress,
+    country: riskContext.country,
+    dnaVerified: riskContext.dnaVerified ?? false,
+    soulprintVerified: riskContext.soulprintVerified ?? false,
+    ledgerRecordFound: riskContext.ledgerRecordFound ?? Boolean(sourceReferenceId),
+    usageCount: riskContext.usageCount ?? 0,
+    suddenUsageSpike: riskContext.suddenUsageSpike ?? false,
+    creatorAccountAgeDays: riskContext.creatorAccountAgeDays ?? accountAgeDays,
+    payoutMethodAgeDays: riskContext.payoutMethodAgeDays ?? accountAgeDays,
+    duplicatePayoutDestination: riskContext.duplicatePayoutDestination ?? false,
+    payoutDestinationChangedRecently: riskContext.payoutDestinationChangedRecently ?? false,
+  });
+
+  const event = {
+    eventType: 'royalty_payout_request',
+    amount: Number(amount),
+    currency,
+    ...normalizedRiskContext,
+  };
+
+  return riskService.createRoyaltyRiskDecision({
+    organizationId,
+    event,
+    idempotencyKey: `payout-risk:${idempotencyKey}`,
+  });
+}
+
+function calculateAgeDays(value) {
+  if (!value) return 0;
+  const createdAt = new Date(value);
+  if (Number.isNaN(createdAt.getTime())) return 0;
+  return Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / (24 * 60 * 60 * 1000)));
+}
+
+function normalizeMetadataInput(metadata) {
+  if (!metadata) return {};
+  if (typeof metadata === 'string') return parseMetadata(metadata);
+  return metadata;
+}
+
+function stripUndefined(object) {
+  return Object.fromEntries(
+    Object.entries(object).filter(([, value]) => value !== undefined)
+  );
+}
+
+function parseMetadata(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function isManualReviewRequired(metadata) {
+  return Boolean(parseMetadata(metadata)[MANUAL_REVIEW_FLAG]);
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +487,9 @@ function formatPayout(row) {
     idempotencyKey: row.idempotency_key,
     sourceType: row.source_type,
     sourceReferenceId: row.source_reference_id || null,
-    metadata: row.metadata,
+    metadata: parseMetadata(row.metadata),
+    manualReviewRequired: isManualReviewRequired(row.metadata),
+    riskDecision: parseMetadata(row.metadata).riskDecision || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -300,6 +509,44 @@ function formatRecipientAccount(row) {
   };
 }
 
+function normalizeListPayoutArgs(organizationIdOrOptions, options = {}) {
+  if (typeof organizationIdOrOptions === 'string') {
+    return {
+      organizationId: organizationIdOrOptions,
+      ...options,
+      status: normalizePayoutStatus(options.status),
+    };
+  }
+
+  const legacyOptions = organizationIdOrOptions || {};
+  return {
+    organizationId: legacyOptions.organizationId || 'org_demo',
+    limit: legacyOptions.limit,
+    cursor: legacyOptions.cursor,
+    status: normalizePayoutStatus(legacyOptions.status),
+    recipientAccountId: legacyOptions.recipientAccountId,
+  };
+}
+
+function normalizePayoutStatus(status) {
+  if (!status) return status;
+
+  const aliases = {
+    completed: 'PAID',
+    paid: 'PAID',
+    sent: 'PAID',
+    queued: 'PENDING',
+    pending: 'PENDING',
+    processing: 'PROCESSING',
+    failed: 'FAILED',
+    canceled: 'CANCELED',
+    cancelled: 'CANCELED',
+    returned: 'RETURNED',
+  };
+
+  return aliases[String(status).toLowerCase()] || String(status).toUpperCase();
+}
+
 module.exports = {
   registerRecipientAccount,
   verifyRecipientAccount,
@@ -312,6 +559,7 @@ module.exports = {
   listPayouts,
   cancelPayout,
   markPayoutReturned,
+  releasePayoutManualReview,
   processScheduledPayouts,
   findUnpostedPayouts,
 };

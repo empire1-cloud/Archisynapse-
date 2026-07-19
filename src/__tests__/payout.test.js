@@ -8,11 +8,15 @@ const ORG_ID = 'org_demo';
 describe('Payout Service', () => {
   let recipientAccountId;
 
-  beforeAll(async () => {
-    await db.migrate.latest();
-    await db('payouts').del();
-    await db('recipient_accounts').del();
-  });
+beforeAll(async () => {
+  await db.migrate.latest();
+  await db('payouts').del();
+  await db('recipient_accounts').del();
+});
+
+afterAll(async () => {
+  await db.destroy();
+});
 
   describe('Recipient Accounts', () => {
     it('should register a recipient account', async () => {
@@ -146,7 +150,71 @@ describe('Payout Service', () => {
           sourceType: 'MANUAL',
         });
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(400);
+    });
+
+    it('should block a high-risk payout request', async () => {
+      const res = await request(app)
+        .post('/api/v1/payouts')
+        .set('Authorization', `Bearer ${VALID_KEY}`)
+        .set('X-Organization-ID', ORG_ID)
+        .send({
+          recipientAccountId,
+          amount: 65.00,
+          idempotencyKey: `idem_payout_risk_block_${Date.now()}`,
+          sourceType: 'EARNINGS',
+          sourceReferenceId: `royalty_block_${Date.now()}`,
+          riskContext: {
+            creatorId: 'creator-route-block',
+            payoutDestination: 'acct_route_blocked',
+            dnaVerified: false,
+            soulprintVerified: false,
+            ledgerRecordFound: false,
+            creatorAccountAgeDays: 0,
+            payoutMethodAgeDays: 0,
+            suddenUsageSpike: true,
+          },
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('risk_blocked');
+    });
+
+    it('should hold and then release a manual-review payout', async () => {
+      const create = await request(app)
+        .post('/api/v1/payouts')
+        .set('Authorization', `Bearer ${VALID_KEY}`)
+        .set('X-Organization-ID', ORG_ID)
+        .send({
+          recipientAccountId,
+          amount: 33.00,
+          idempotencyKey: `idem_payout_review_${Date.now()}`,
+          sourceType: 'EARNINGS',
+          sourceReferenceId: `royalty_review_${Date.now()}`,
+          riskContext: {
+            creatorId: 'creator-route-review',
+            payoutDestination: 'acct_route_review',
+            dnaVerified: false,
+            soulprintVerified: false,
+            ledgerRecordFound: true,
+            creatorAccountAgeDays: 120,
+            payoutMethodAgeDays: 120,
+          },
+        });
+
+      expect(create.status).toBe(201);
+      expect(create.body.status).toBe('PENDING');
+      expect(create.body.manualReviewRequired).toBe(true);
+
+      const release = await request(app)
+        .post(`/api/v1/payouts/${create.body.id}/release`)
+        .set('Authorization', `Bearer ${VALID_KEY}`)
+        .set('X-Organization-ID', ORG_ID)
+        .send({ note: 'Compliance approved' });
+
+      expect(release.status).toBe(200);
+      expect(release.body.status).toBe('PAID');
+      expect(release.body.manualReviewRequired).toBe(false);
     });
 
     it('should fail without auth', async () => {

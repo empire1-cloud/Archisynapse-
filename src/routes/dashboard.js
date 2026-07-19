@@ -5,18 +5,28 @@ const transactionService = require('../services/transactionService');
 const customerService = require('../services/customerService');
 const payoutService = require('../services/payoutService');
 
+const SUCCESS_TRANSACTION_STATUSES = new Set(['SUCCEEDED', 'succeeded', 'settled']);
+const FAILED_TRANSACTION_STATUSES = new Set(['FAILED', 'failed']);
+const PENDING_TRANSACTION_STATUSES = new Set(['PENDING', 'pending', 'AUTHORIZED', 'authorized']);
+const REFUNDED_TRANSACTION_STATUSES = new Set(['REFUNDED', 'refunded', 'PARTIALLY_REFUNDED', 'partially_refunded']);
+const PENDING_PAYOUT_STATUSES = new Set(['PENDING', 'pending', 'PROCESSING', 'processing']);
+
 router.get('/', authMiddleware, async (req, res, next) => {
   try {
-    const allTxns = Array.from(transactionService.transactions.values());
+    const txnResult = await transactionService.listTransactions({
+      organizationId: req.organizationId,
+      limit: 10000,
+    });
     const allCustomers = await customerService.listCustomers({ limit: 1000 });
-    const payoutResult = await payoutService.listPayouts({ limit: 1000 });
+    const payoutResult = await payoutService.listPayouts(req.organizationId, { limit: 1000 });
 
-    const succeeded = allTxns.filter(t => t.status === 'succeeded');
+    const succeeded = txnResult.data.filter((t) => SUCCESS_TRANSACTION_STATUSES.has(t.status));
     const totalVolume = succeeded.reduce((sum, t) => sum + t.amount, 0);
-    const successRate = allTxns.length > 0 ? (succeeded.length / allTxns.length * 100).toFixed(1) : 0;
+    const successRate = txnResult.data.length > 0
+      ? (succeeded.length / txnResult.data.length * 100).toFixed(1)
+      : 0;
 
-    const recentActivity = allTxns
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    const recentActivity = txnResult.data
       .slice(0, 5)
       .map(t => ({
         id: t.id,
@@ -24,29 +34,29 @@ router.get('/', authMiddleware, async (req, res, next) => {
         currency: t.currency,
         status: t.status,
         description: t.description,
-        created_at: t.created_at
+        created_at: t.created_at,
       }));
 
     const statusBreakdown = {
-      succeeded: allTxns.filter(t => t.status === 'succeeded').length,
-      failed: allTxns.filter(t => t.status === 'failed').length,
-      pending: allTxns.filter(t => t.status === 'pending').length,
-      refunded: allTxns.filter(t => t.status === 'refunded').length
+      succeeded: txnResult.data.filter((t) => SUCCESS_TRANSACTION_STATUSES.has(t.status)).length,
+      failed: txnResult.data.filter((t) => FAILED_TRANSACTION_STATUSES.has(t.status)).length,
+      pending: txnResult.data.filter((t) => PENDING_TRANSACTION_STATUSES.has(t.status)).length,
+      refunded: txnResult.data.filter((t) => REFUNDED_TRANSACTION_STATUSES.has(t.status)).length,
     };
 
     res.json({
       metrics: {
-        total_transactions: allTxns.length,
-        total_volume_cents: totalVolume,
-        total_volume_formatted: `$${(totalVolume / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+        total_transactions: txnResult.data.length,
+        total_volume_cents: Math.round(totalVolume * 100),
+        total_volume_formatted: `$${(totalVolume).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
         success_rate_percent: parseFloat(successRate),
         active_customers: allCustomers.total,
-        pending_payouts: payoutResult.data.filter(p => p.status === 'pending' || p.status === 'processing').length,
-        average_response_time_ms: 42
+        pending_payouts: payoutResult.data.filter((p) => PENDING_PAYOUT_STATUSES.has(p.status)).length,
+        average_response_time_ms: 42,
       },
       status_breakdown: statusBreakdown,
       recent_activity: recentActivity,
-      generated_at: new Date().toISOString()
+      generated_at: new Date().toISOString(),
     });
   } catch (err) {
     next(err);

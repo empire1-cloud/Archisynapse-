@@ -1,561 +1,543 @@
 "use client"
 
-import { useState, useCallback, useMemo, useEffect } from "react"
-import { Blueprint, ArchComponent, ComponentType, MarketEvent } from "@/types/architecture"
-import { Header } from "@/components/architecture/Header"
-import { ComponentLibrary } from "@/components/architecture/ComponentLibrary"
-import { CanvasNode } from "@/components/architecture/CanvasNode"
-import { ConnectionsLayer } from "@/components/architecture/ConnectionsLayer"
-import { AIAnalysisPanel } from "@/components/architecture/AIAnalysisPanel"
-import { DependencyAnalysisPanel } from "@/components/architecture/DependencyAnalysisPanel"
-import { BusinessROIInspector } from "@/components/architecture/BusinessROIInspector"
-import { SynapseInsights } from "@/components/architecture/SynapseInsights"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tooltip } from "@/components/ui/tooltip"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
+import { useEffect, useMemo, useState } from "react"
+import { Activity, AlertTriangle, BarChart3, Clock, RefreshCw, Shield, TrendingUp } from "lucide-react"
+import { ArchitectureCanvas } from "@/components/ArchitectureCanvas"
+import { type CanvasComponent } from "@/components/ArchitectureNode"
+import { LeftSidebar } from "@/components/LeftSidebar"
+import { RightAnalytics } from "@/components/RightAnalytics"
+import { TopBar } from "@/components/TopBar"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { api, type Blueprint, type DashboardResponse, type GraphInfo, type GraphRecommendation, type HealthResponse, type PayoutRecord, type RiskSummaryResponse, type TrialBalanceResponse } from "@/lib/api"
+import { getComponentType } from "@/components/ComponentRegistry"
 import { cn } from "@/lib/utils"
-import { useToast } from "@/hooks/use-toast"
-import { generateStrategyBlueprint } from "@/ai/flows/strategy-to-blueprint-flow"
-import { generateExecutiveBriefing, BriefingOutput } from "@/ai/flows/executive-briefing-flow"
-import { compareStrategies, ComparisonOutput } from "@/ai/flows/strategy-comparison-flow"
-import { generateMarketEvent } from "@/ai/flows/market-sentinel-flow"
-import {
-  Sparkles, Loader2, FileText, Scale, Play, Square, Flame, Radar,
-  ChevronLeft, ChevronRight, Layout, AlertCircle
-} from "lucide-react"
 
-function createDefaultBlueprint(): Blueprint {
-  return {
-    id: "bp-1",
-    name: "Fintech Core Platform",
-    version: "2.0.0",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    components: [
-      { id: "c1", name: "Mobile App", type: "user-interface", description: "Customer facing mobile banking app", config: {}, position: { x: 250, y: 150 }, roiScore: 80, riskScore: 20, status: "healthy", latency: 45, throughput: 1200, techDebtScore: 10 },
-      { id: "c2", name: "Edge Gateway", type: "gateway", description: "Global entry point with security filtering", config: {}, position: { x: 550, y: 150 }, roiScore: 60, riskScore: 10, status: "healthy", latency: 5, throughput: 5000, techDebtScore: 5 },
-      { id: "c3", name: "Payment Service", type: "payment-processor", description: "PCI-compliant card processing", config: {}, position: { x: 850, y: 150 }, roiScore: 95, riskScore: 40, status: "healthy", latency: 120, throughput: 450, techDebtScore: 25 },
-      { id: "c4", name: "Auth Service", type: "auth-provider", description: "KYC/AML identity verification", config: {}, position: { x: 250, y: 400 }, roiScore: 70, riskScore: 15, status: "healthy", latency: 30, throughput: 800, techDebtScore: 8 },
-      { id: "c5", name: "Fraud Detection", type: "fraud-detection", description: "ML-based fraud scoring", config: {}, position: { x: 550, y: 400 }, roiScore: 85, riskScore: 25, status: "healthy", latency: 60, throughput: 300, techDebtScore: 15 },
-    ],
-    dependencies: [
-      { id: "d1", sourceId: "c1", targetId: "c2", type: "sync" },
-      { id: "d2", sourceId: "c2", targetId: "c3", type: "sync" },
-      { id: "d3", sourceId: "c4", targetId: "c2", type: "sync" },
-      { id: "d4", sourceId: "c5", targetId: "c3", type: "async" },
-      { id: "d5", sourceId: "c4", targetId: "c1", type: "sync" },
-    ],
-  }
+type StudioMode = "studio" | "neural" | "yield" | "risk"
+
+const COMPONENT_BLUEPRINT_MAP: Record<string, string[]> = {
+  gateway: ["compliance-aware-routing"],
+  "lyrica-rail": ["event-driven-settlement", "micro-royalty-streaming"],
+  ledger: ["event-driven-settlement", "digital-asset-provenance"],
+  analytics: ["creator-subscription-model", "event-driven-settlement"],
+  "fraud-detection": ["compliance-aware-routing"],
+  "dna-tagger": ["digital-asset-provenance", "attribution-graph-pattern"],
+  "soulfire-engine": ["ai-music-generation-pipeline", "multi-agent-workflow"],
+  "micro-royalties": ["micro-royalty-streaming", "creator-royalty-split"],
+  "marketplace-api": ["marketplace-escrow-pattern"],
+  "fee-collector": ["creator-subscription-model", "event-driven-settlement"],
+  "reputation-svc": ["compliance-aware-routing"],
 }
 
-export default function ArchisynapseApp() {
-  const [mounted, setMounted] = useState(false)
-  const [blueprint, setBlueprint] = useState<Blueprint>(createDefaultBlueprint)
-  const [vaultedStrategies, setVaultedStrategies] = useState<Blueprint[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [isSimulating, setIsSimulating] = useState(false)
-  const [heatmapMode, setHeatmapMode] = useState<"none" | "roi" | "risk" | "quality">("none")
-  const [totalRevenue, setTotalRevenue] = useState(0)
+const DEFAULT_EDGES = [
+  { id: "edge-dashboard-gateway", sourceId: "dashboard-live", targetId: "gateway-live" },
+  { id: "edge-gateway-rail", sourceId: "gateway-live", targetId: "rail-live" },
+  { id: "edge-gateway-risk", sourceId: "gateway-live", targetId: "risk-live" },
+  { id: "edge-risk-rail", sourceId: "risk-live", targetId: "rail-live" },
+  { id: "edge-rail-ledger", sourceId: "rail-live", targetId: "ledger-live" },
+  { id: "edge-gateway-analytics", sourceId: "gateway-live", targetId: "analytics-live" },
+  { id: "edge-rail-analytics", sourceId: "rail-live", targetId: "analytics-live" },
+]
 
-  const [leftPanelOpen, setLeftPanelOpen] = useState(true)
-  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+const MODE_OPTIONS: Array<{ id: StudioMode; label: string }> = [
+  { id: "studio", label: "Studio" },
+  { id: "neural", label: "Neural" },
+  { id: "yield", label: "Yield" },
+  { id: "risk", label: "Risk" },
+]
 
-  const [strategyModalOpen, setStrategyModalOpen] = useState(false)
-  const [briefingModalOpen, setBriefingModalOpen] = useState(false)
-  const [comparisonModalOpen, setComparisonModalOpen] = useState(false)
-  const [marketEventModalOpen, setMarketEventModalOpen] = useState(false)
+function toPercent(value: number) {
+  return `${Math.round(value)}%`
+}
 
-  const [strategyGoal, setStrategyGoal] = useState("")
-  const [generating, setGenerating] = useState(false)
-  const [briefing, setBriefing] = useState<BriefingOutput | null>(null)
-  const [generatingBriefing, setGeneratingBriefing] = useState(false)
-  const [comparison, setComparison] = useState<ComparisonOutput | null>(null)
-  const [comparing, setComparing] = useState(false)
-  const [scanningMarket, setScanningMarket] = useState(false)
-  const [activeMarketEvent, setActiveMarketEvent] = useState<MarketEvent | null>(null)
+function clamp(value: number, min = 0, max = 100) {
+  return Math.min(Math.max(value, min), max)
+}
 
-  const { toast } = useToast()
+function buildLiveComponents({
+  dashboard,
+  health,
+  graphInfo,
+  riskSummary,
+  trialBalance,
+  unpostedPayouts,
+}: {
+  dashboard: DashboardResponse | null
+  health: HealthResponse | null
+  graphInfo: GraphInfo | null
+  riskSummary: RiskSummaryResponse | null
+  trialBalance: TrialBalanceResponse | null
+  unpostedPayouts: PayoutRecord[]
+}): CanvasComponent[] {
+  const successRate = dashboard?.metrics.success_rate_percent ?? 0
+  const averageResponseTime = dashboard?.metrics.average_response_time_ms ?? 20
+  const volume = dashboard?.metrics.total_volume_formatted ?? "$0.00"
+  const activeCustomers = dashboard?.metrics.active_customers ?? 0
+  const pendingPayouts = dashboard?.metrics.pending_payouts ?? unpostedPayouts.length
+  const graphCoverage = graphInfo ? clamp((graphInfo.nodes / 12) * 100) : 0
+  const ledgerIntegrity = trialBalance?.isBalanced ? 100 : 72
+  const bridgeHealthy = health?.status === "ok"
+  const reviewQueue = (riskSummary?.blockedPayoutEvents ?? 0) + (riskSummary?.manualReviewEvents ?? 0)
+  const riskShield = riskSummary ? clamp(100 - riskSummary.averageRiskScore) : 58
 
-  useEffect(() => { setMounted(true) }, [])
+  return [
+    {
+      id: "dashboard-live",
+      type: "user-interface",
+      position: { x: 120, y: 520 },
+      status: bridgeHealthy ? "healthy" : "failed",
+      label: "Merchant Dashboard",
+      subtitle: "Registry Surface",
+      metricLabel: "Volume",
+      metricValue: volume,
+      latencyMs: 12,
+    },
+    {
+      id: "gateway-live",
+      type: "gateway",
+      position: { x: 700, y: 140 },
+      status: bridgeHealthy ? "healthy" : "failed",
+      label: "API Gateway",
+      subtitle: "Compliance Gateway",
+      metricLabel: "Yield",
+      metricValue: toPercent(successRate),
+      latencyMs: averageResponseTime,
+    },
+    {
+      id: "rail-live",
+      type: "lyrica-rail",
+      position: { x: 1640, y: 320 },
+      status: pendingPayouts > 0 ? "standby" : "healthy",
+      label: "Lyrica Clearing Rail",
+      subtitle: "Settlement Orchestrator",
+      metricLabel: "Pending",
+      metricValue: `${pendingPayouts}`,
+      latencyMs: 20,
+    },
+    {
+      id: "risk-live",
+      type: "fraud-detection",
+      position: { x: 1260, y: 180 },
+      status: riskSummary ? (reviewQueue > 0 ? "standby" : "healthy") : "standby",
+      label: "ML Risk Sentinel",
+      subtitle: `${riskSummary?.totalEvents ?? 0} live risk events`,
+      metricLabel: "Shield",
+      metricValue: toPercent(riskShield),
+      latencyMs: 14,
+    },
+    {
+      id: "ledger-live",
+      type: "ledger",
+      position: { x: 920, y: 1180 },
+      status: trialBalance?.isBalanced ? "healthy" : "standby",
+      label: "Immutable Ledger",
+      subtitle: "Ledger Truth",
+      metricLabel: "Integrity",
+      metricValue: toPercent(ledgerIntegrity),
+      latencyMs: 8,
+    },
+    {
+      id: "analytics-live",
+      type: "analytics",
+      position: { x: 2200, y: 1160 },
+      status: graphInfo ? "healthy" : "standby",
+      label: "Neural Analytics",
+      subtitle: `${activeCustomers} active customers`,
+      metricLabel: "Coverage",
+      metricValue: toPercent(graphCoverage),
+      latencyMs: 26,
+    },
+  ]
+}
 
-  const selectedComponent = blueprint.components.find(c => c.id === selectedId)
+export default function ArchisynapseStudioPage() {
+  const [activeNav, setActiveNav] = useState("registry")
+  const [activeMode, setActiveMode] = useState<StudioMode>("studio")
+  const [components, setComponents] = useState<CanvasComponent[]>([])
+  const [edges] = useState(DEFAULT_EDGES)
+  const [selectedId, setSelectedId] = useState<string | null>("gateway-live")
+  const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null)
+  const [graphInfo, setGraphInfo] = useState<GraphInfo | null>(null)
+  const [riskSummary, setRiskSummary] = useState<RiskSummaryResponse | null>(null)
+  const [trialBalance, setTrialBalance] = useState<TrialBalanceResponse | null>(null)
+  const [unpostedPayouts, setUnpostedPayouts] = useState<PayoutRecord[]>([])
+  const [heldPayouts, setHeldPayouts] = useState<PayoutRecord[]>([])
+  const [blueprints, setBlueprints] = useState<Blueprint[]>([])
+  const [recommendations, setRecommendations] = useState<GraphRecommendation[]>([])
+  const [lastAction, setLastAction] = useState("Live registry booted")
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [releasingPayoutId, setReleasingPayoutId] = useState<string | null>(null)
+  const [errorMessages, setErrorMessages] = useState<string[]>([])
 
-  const governanceAnalysis = useMemo(() => {
-    let gaps = 0
-    const gapComponentIds = new Set<string>()
-    const types = blueprint.components.map(c => c.type)
+  const loadStudio = async (reason = "Live registry refreshed") => {
+    setBusy(true)
+    const results = await Promise.allSettled([
+      api.health(),
+      api.dashboard(),
+      api.graphInfo(),
+      api.riskSummary(),
+      api.ledgerTrialBalance(),
+      api.listPayouts({ status: "pending", limit: 12 }),
+      api.listUnpostedPayouts(),
+      api.listBlueprints({ limit: 24 }),
+    ])
 
-    if (types.includes("payment-processor") && !types.includes("fraud-detection")) {
-      blueprint.components.filter(c => c.type === "payment-processor").forEach(c => gapComponentIds.add(c.id)); gaps++
-    }
-    if (types.includes("database") && !types.includes("auth-provider")) {
-      blueprint.components.filter(c => c.type === "database").forEach(c => gapComponentIds.add(c.id)); gaps++
-    }
-    if (types.includes("user-interface") && !types.includes("gateway")) {
-      blueprint.components.filter(c => c.type === "user-interface").forEach(c => gapComponentIds.add(c.id)); gaps++
-    }
-    return { totalGaps: gaps, gapComponentIds }
-  }, [blueprint.components])
+    const failures: string[] = []
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout
-    if (isSimulating && mounted) {
-      interval = setInterval(() => {
-        const inc = blueprint.components.reduce((acc, c) => {
-          if (c.status !== "healthy") return acc
-          return acc + ((c.roiScore || 50) * (c.throughput / 10000))
-        }, 0)
-        setTotalRevenue(prev => prev + inc)
-      }, 1000)
-    }
-    return () => clearInterval(interval)
-  }, [isSimulating, blueprint.components, mounted])
+    const healthResult = results[0]
+    const dashboardResult = results[1]
+    const graphInfoResult = results[2]
+    const riskSummaryResult = results[3]
+    const trialBalanceResult = results[4]
+    const pendingPayoutsResult = results[5]
+    const unpostedResult = results[6]
+    const blueprintsResult = results[7]
 
-  const globalStats = useMemo(() => {
-    const totalRoi = blueprint.components.reduce((acc, c) => acc + (c.roiScore || 50), 0)
-    const totalRisk = blueprint.components.reduce((acc, c) => acc + (c.riskScore || 20), 0)
-    const count = blueprint.components.length || 1
-    return {
-      roi: Math.round(totalRoi / count),
-      security: 100 - Math.round(totalRisk / count),
-      efficiency: 74,
-      governanceGaps: governanceAnalysis.totalGaps,
-      revenue: totalRevenue,
-    }
-  }, [blueprint.components, governanceAnalysis, totalRevenue])
+    const nextHealth = healthResult.status === "fulfilled" ? healthResult.value : null
+    if (healthResult.status === "rejected") failures.push(`health: ${healthResult.reason instanceof Error ? healthResult.reason.message : "request failed"}`)
 
-  const handleAddComponent = useCallback((type: ComponentType) => {
-    const offset = blueprint.components.length * 30
-    const newComp: ArchComponent = {
-      id: `c_${Date.now()}`,
-      name: type.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
-      type,
-      description: `A new ${type} component`,
-      config: {},
-      position: { x: 400 + offset, y: 300 + offset },
-      roiScore: Math.floor(40 + Math.random() * 50),
-      riskScore: Math.floor(10 + Math.random() * 40),
-      status: "healthy",
-      latency: Math.floor(10 + Math.random() * 100),
-      throughput: Math.floor(100 + Math.random() * 2000),
-      techDebtScore: Math.floor(Math.random() * 30),
-    }
-    setBlueprint(prev => ({ ...prev, components: [...prev.components, newComp] }))
-  }, [blueprint.components.length])
+    const nextDashboard = dashboardResult.status === "fulfilled" ? dashboardResult.value : null
+    if (dashboardResult.status === "rejected") failures.push(`dashboard: ${dashboardResult.reason instanceof Error ? dashboardResult.reason.message : "request failed"}`)
 
-  const handleDrag = useCallback((id: string, x: number, y: number) => {
-    setBlueprint(prev => ({
-      ...prev,
-      components: prev.components.map(c => c.id === id ? { ...c, position: { x, y } } : c),
+    const nextGraphInfo = graphInfoResult.status === "fulfilled" ? graphInfoResult.value : null
+    if (graphInfoResult.status === "rejected") failures.push(`graph: ${graphInfoResult.reason instanceof Error ? graphInfoResult.reason.message : "request failed"}`)
+
+    const nextRiskSummary = riskSummaryResult.status === "fulfilled" ? riskSummaryResult.value : null
+    if (riskSummaryResult.status === "rejected") failures.push(`risk: ${riskSummaryResult.reason instanceof Error ? riskSummaryResult.reason.message : "request failed"}`)
+
+    const nextTrialBalance = trialBalanceResult.status === "fulfilled" ? trialBalanceResult.value : null
+    if (trialBalanceResult.status === "rejected") failures.push(`ledger: ${trialBalanceResult.reason instanceof Error ? trialBalanceResult.reason.message : "request failed"}`)
+
+    const nextHeldPayouts = pendingPayoutsResult.status === "fulfilled"
+      ? pendingPayoutsResult.value.data.filter((payout) => payout.manualReviewRequired)
+      : []
+    if (pendingPayoutsResult.status === "rejected") failures.push(`pending-payouts: ${pendingPayoutsResult.reason instanceof Error ? pendingPayoutsResult.reason.message : "request failed"}`)
+
+    const nextUnpostedPayouts = unpostedResult.status === "fulfilled" ? unpostedResult.value.data : []
+    if (unpostedResult.status === "rejected") failures.push(`payouts: ${unpostedResult.reason instanceof Error ? unpostedResult.reason.message : "request failed"}`)
+
+    const nextBlueprints = blueprintsResult.status === "fulfilled" ? blueprintsResult.value.items : []
+    if (blueprintsResult.status === "rejected") failures.push(`blueprints: ${blueprintsResult.reason instanceof Error ? blueprintsResult.reason.message : "request failed"}`)
+
+    setHealth(nextHealth)
+    setDashboard(nextDashboard)
+    setGraphInfo(nextGraphInfo)
+    setRiskSummary(nextRiskSummary)
+    setTrialBalance(nextTrialBalance)
+    setHeldPayouts(nextHeldPayouts)
+    setUnpostedPayouts(nextUnpostedPayouts)
+    setBlueprints(nextBlueprints)
+    setComponents(buildLiveComponents({
+      dashboard: nextDashboard,
+      health: nextHealth,
+      graphInfo: nextGraphInfo,
+      riskSummary: nextRiskSummary,
+      trialBalance: nextTrialBalance,
+      unpostedPayouts: nextUnpostedPayouts,
     }))
-  }, [])
-
-  const handleRemove = useCallback((id: string) => {
-    setBlueprint(prev => ({
-      ...prev,
-      components: prev.components.filter(c => c.id !== id),
-      dependencies: prev.dependencies.filter(d => d.sourceId !== id && d.targetId !== id),
-    }))
-    if (selectedId === id) setSelectedId(null)
-  }, [selectedId])
-
-  const handleSelect = useCallback((id: string | null) => setSelectedId(id), [])
-
-  const toggleChaos = () => {
-    if (blueprint.components.length === 0) return
-    const idx = Math.floor(Math.random() * blueprint.components.length)
-    const target = blueprint.components[idx]
-    setBlueprint(prev => ({
-      ...prev,
-      components: prev.components.map(c =>
-        c.id === target.id ? { ...c, status: c.status === "failed" ? "healthy" : "failed" } : c
-      ),
-    }))
-    toast({ variant: "destructive", title: "Resilience Test", description: `Injected failure into ${target.name}` })
+    setErrorMessages(failures)
+    setLastAction(reason)
+    setLoading(false)
+    setBusy(false)
   }
 
-  const handleGenerateFromStrategy = async () => {
-    if (!strategyGoal) return
-    setGenerating(true)
+  useEffect(() => {
+    loadStudio().catch((error) => {
+      setErrorMessages([error instanceof Error ? error.message : "Studio bootstrap failed"])
+      setComponents(buildLiveComponents({
+        dashboard: null,
+        health: null,
+        graphInfo: null,
+        riskSummary: null,
+        trialBalance: null,
+        unpostedPayouts: [],
+      }))
+      setHeldPayouts([])
+      setLoading(false)
+      setBusy(false)
+    })
+  }, [])
+
+  const handleAddComponent = (typeId: string) => {
+    const type = getComponentType(typeId)
+    const newComponent: CanvasComponent = {
+      id: `${typeId}-${Date.now()}`,
+      type: typeId,
+      position: {
+        x: 240 + (components.length % 4) * 320,
+        y: 1760 + Math.floor(components.length / 4) * 320,
+      },
+      status: "healthy",
+      label: type?.name || typeId,
+      subtitle: type?.slug || typeId,
+      metricLabel: "Mode",
+      metricValue: activeMode.toUpperCase(),
+      latencyMs: 18,
+    }
+    setComponents((current) => [...current, newComponent])
+    setSelectedId(newComponent.id)
+    setLastAction(`Added ${type?.name || typeId} to canvas`)
+  }
+
+  const handleDrag = (id: string, x: number, y: number) => {
+    setComponents((current) =>
+      current.map((component) =>
+        component.id === id ? { ...component, position: { x, y } } : component
+      )
+    )
+  }
+
+  const handleRemove = (id: string) => {
+    setComponents((current) => current.filter((component) => component.id !== id))
+    setSelectedId((current) => (current === id ? null : current))
+    setLastAction(`Removed ${id} from canvas`)
+  }
+
+  const handleRefresh = () => {
+    loadStudio("Live registry refreshed").catch((error) => {
+      setErrorMessages([error instanceof Error ? error.message : "Refresh failed"])
+      setBusy(false)
+    })
+  }
+
+  const handleReleasePayout = async (payoutId: string) => {
+    setReleasingPayoutId(payoutId)
+    setLastAction(`Releasing ${payoutId.slice(0, 10)} for payout execution`)
     try {
-      const result = await generateStrategyBlueprint({ goal: strategyGoal })
-      const newBp: Blueprint = {
-        id: `bp-${Date.now()}`,
-        name: result.name,
-        version: "1.0.0",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        components: result.components.map(c => ({
-          ...c, config: {}, status: "healthy" as const,
-          latency: 20, throughput: 1000, techDebtScore: 5,
-        })),
-        dependencies: result.dependencies.map(d => ({ ...d, id: `d-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` })),
-      }
-      setBlueprint(newBp)
-      setVaultedStrategies(prev => [...prev, newBp])
-      setStrategyModalOpen(false)
-      toast({ title: "Strategy Synthesized", description: result.name })
-    } catch {
-      toast({ variant: "destructive", title: "Synthesis Failed" })
+      await api.releasePayout(payoutId, "Released from Archisynapse Studio")
+      await loadStudio("Manual review payout released")
+    } catch (error) {
+      setErrorMessages([error instanceof Error ? error.message : "Payout release failed"])
+      setLastAction("Manual review release failed")
+      setBusy(false)
     } finally {
-      setGenerating(false)
+      setReleasingPayoutId(null)
+    }
+  }
+
+  const handleSynthesize = async () => {
+    setBusy(true)
+    setLastAction("Running graph synthesis")
+    try {
+      const seeds = Array.from(
+        new Set(
+          components.flatMap((component) => COMPONENT_BLUEPRINT_MAP[component.type] || [])
+        )
+      )
+
+      if (seeds.length === 0) {
+        setRecommendations([])
+        setLastAction("No blueprint seeds mapped from current canvas")
+        setBusy(false)
+        return
+      }
+
+      const response = await api.graphRecommendations(seeds, 6)
+      setRecommendations(response.items)
+      setLastAction(`Synthesized ${response.items.length} graph recommendations`)
+    } catch (error) {
+      setErrorMessages([error instanceof Error ? error.message : "Synthesis failed"])
+      setLastAction("Graph synthesis failed")
+    } finally {
+      setBusy(false)
     }
   }
 
   const handleCompare = async () => {
-    if (vaultedStrategies.length < 1) {
-      toast({ title: "Insufficient Scenarios", description: "Vault at least one design first." })
-      return
-    }
-    setComparing(true)
-    setComparisonModalOpen(true)
+    setBusy(true)
+    setLastAction("Comparing canvas against blueprint registry")
     try {
-      const baseline = vaultedStrategies[0]
-      const result = await compareStrategies({
-        baseline: { name: baseline.name, components: baseline.components.map(c => ({ name: c.name, type: c.type, roiScore: c.roiScore, riskScore: c.riskScore })) },
-        alternative: { name: blueprint.name, components: blueprint.components.map(c => ({ name: c.name, type: c.type, roiScore: c.roiScore, riskScore: c.riskScore })) },
-      })
-      setComparison(result)
-    } catch {
-      toast({ variant: "destructive", title: "Analysis Failed" })
+      const query = components.map((component) => component.label || component.type).join(" ")
+      const response = await api.matchBlueprints({ query, limit: 6 })
+      setRecommendations(
+        response.items.map((item) => ({
+          blueprintId: item.blueprint.id,
+          source: "semantic-compare",
+          reason: `Semantic score ${item.score.toFixed(2)}`,
+          confidence: item.score,
+          blueprint: item.blueprint,
+          sourceBlueprint: item.blueprint,
+        }))
+      )
+      setLastAction(`Compared against ${response.items.length} registry blueprints`)
+    } catch (error) {
+      setErrorMessages([error instanceof Error ? error.message : "Compare failed"])
+      setLastAction("Blueprint compare failed")
     } finally {
-      setComparing(false)
+      setBusy(false)
     }
   }
 
-  const runMarketSentinel = async () => {
-    setScanningMarket(true)
-    try {
-      const summary = blueprint.components.map(c => `${c.name} (${c.type})`).join(", ")
-      const event = await generateMarketEvent(summary)
-      setActiveMarketEvent(event as MarketEvent)
-      setMarketEventModalOpen(true)
-      setBlueprint(prev => ({
-        ...prev,
-        components: prev.components.map(c => ({ ...c, isHighlighted: (event as MarketEvent).affectedTypes.includes(c.type) })),
+  const signalScore = useMemo(() => {
+    const successScore = dashboard?.metrics.success_rate_percent ?? 0
+    const balanceScore = trialBalance?.isBalanced ? 100 : 65
+    const graphScore = graphInfo ? clamp((graphInfo.edges / Math.max(graphInfo.nodes, 1)) * 40) : 0
+    const payoutPenalty = Math.min(unpostedPayouts.length * 7, 30)
+    const riskConfidence = riskSummary ? clamp(100 - riskSummary.averageRiskScore) : 65
+    return clamp(Math.round(successScore * 0.35 + balanceScore * 0.25 + graphScore + riskConfidence * 0.15 - payoutPenalty))
+  }, [dashboard, trialBalance, graphInfo, riskSummary, unpostedPayouts.length])
+
+  const riskScore = useMemo(() => {
+    if (riskSummary) {
+      const decisionPressure = Math.min(
+        riskSummary.blockedPayoutEvents * 12 +
+        riskSummary.manualReviewEvents * 7 +
+        riskSummary.delayedPayoutEvents * 4,
+        60
+      )
+      return clamp(100 - riskSummary.averageRiskScore - decisionPressure)
+    }
+
+    const payoutRisk = Math.min(unpostedPayouts.length * 12, 60)
+    const failedTransactions = dashboard?.status_breakdown.failed ?? 0
+    const failedRisk = Math.min(failedTransactions * 4, 40)
+    const balanceRisk = trialBalance?.isBalanced ? 0 : 25
+    return clamp(100 - payoutRisk - failedRisk - balanceRisk)
+  }, [dashboard, riskSummary, trialBalance, unpostedPayouts.length])
+
+  const timeToRecovery = useMemo(() => {
+    const response = dashboard?.metrics.average_response_time_ms ?? 20
+    return clamp(100 - Math.min(response, 100))
+  }, [dashboard])
+
+  const bridgeVariant = errorMessages.length > 0 ? "destructive" : health?.status === "ok" ? "success" : "secondary"
+  const bridgeStatus = errorMessages.length > 0 ? "Live Partial" : health?.status === "ok" ? "Bridge Active" : "Awaiting Signal"
+  const environmentLabel = health?.status === "ok" ? "Production Mirror" : "Local Live Wiring"
+
+  const topMetrics = [
+    { label: "Live Volume", value: dashboard?.metrics.total_volume_formatted || "$0.00", tone: "text-emerald-400" },
+    { label: "Success Rate", value: dashboard ? toPercent(dashboard.metrics.success_rate_percent) : "--", tone: "text-primary" },
+    { label: "Risk Events", value: riskSummary ? String(riskSummary.totalEvents) : "--", tone: "text-amber-400" },
+    { label: "Graph Nodes", value: graphInfo ? String(graphInfo.nodes) : "--", tone: "text-cyan-400" },
+  ]
+
+  const summaryMetrics = [
+    { icon: BarChart3, label: "Impact Score", value: `${signalScore}/100`, color: "text-primary" },
+    { icon: TrendingUp, label: "Revenue Surface", value: dashboard?.metrics.total_volume_formatted || "$0.00", color: "text-emerald-400" },
+    {
+      icon: Shield,
+      label: "Risk State",
+      value: `${riskScore}/100`,
+      color: riskScore >= 80 ? "text-emerald-400" : "text-amber-400",
+      sub: riskSummary
+        ? `${riskSummary.blockedPayoutEvents} blocked • ${riskSummary.manualReviewEvents} manual review`
+        : `${unpostedPayouts.length} payout exceptions`,
+    },
+    { icon: Clock, label: "Settlement Latency", value: `${dashboard?.metrics.average_response_time_ms ?? 0}ms`, color: "text-cyan-400" },
+  ]
+
+  const scoreBars = [
+    { label: "Revenue Potential", value: clamp((dashboard?.metrics.total_transactions ?? 0) * 4, 0, 100), tone: "bg-cyan-400" },
+    { label: "Risk Management", value: riskScore, tone: riskScore >= 80 ? "bg-emerald-400" : "bg-amber-400" },
+    { label: "Time-to-Market", value: timeToRecovery, tone: "bg-primary" },
+  ]
+
+  const recommendationSignals = recommendations.length > 0
+    ? recommendations.map((item) => ({
+        title: item.blueprint.name,
+        subtitle: item.reason || `${item.sourceBlueprint.name} -> ${item.blueprint.name}`,
       }))
-    } catch {
-      toast({ variant: "destructive", title: "Sentinel Offline" })
-    } finally {
-      setScanningMarket(false)
-    }
-  }
+    : blueprints.slice(0, 4).map((blueprint) => ({
+        title: blueprint.name,
+        subtitle: blueprint.tags.slice(0, 3).join(" • ") || blueprint.category,
+      }))
 
-  const handleBriefing = async () => {
-    setGeneratingBriefing(true)
-    setBriefingModalOpen(true)
-    try {
-      const res = await generateExecutiveBriefing({
-        blueprintName: blueprint.name,
-        components: blueprint.components.map(c => ({ name: c.name, type: c.type, roiScore: c.roiScore, riskScore: c.riskScore })),
-        businessGoal: strategyGoal || "Strategic Market Growth",
-      })
-      setBriefing(res)
-    } catch {
-      toast({ variant: "destructive", title: "Briefing Failed" })
-    } finally {
-      setGeneratingBriefing(false)
-    }
-  }
-
-  if (!mounted) return null
+  const systemSignals = [
+    { label: "Bridge Health", value: health?.status || "offline" },
+    { label: "Ledger Balance", value: trialBalance?.isBalanced ? "balanced" : "reconcile" },
+    { label: "Unposted Payouts", value: String(unpostedPayouts.length) },
+    { label: "Blocked Payouts", value: String(riskSummary?.blockedPayoutEvents ?? 0) },
+    { label: "Manual Review", value: String(riskSummary?.manualReviewEvents ?? 0) },
+    { label: "Held Queue", value: String(heldPayouts.length) },
+    { label: "Recent Activity", value: String(dashboard?.recent_activity.length || 0) },
+    { label: "Registry Assets", value: String(blueprints.length) },
+  ]
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground selection:bg-primary/30">
-      <Header
-        blueprintName={blueprint.name}
-        onSave={() => {
-          setVaultedStrategies(prev => [...prev, blueprint])
-          toast({ title: "Design Vaulted" })
-        }}
-        onExport={() => {}}
-        onGenerate={() => setStrategyModalOpen(true)}
-        onBriefing={handleBriefing}
+    <main className="h-screen overflow-hidden bg-background text-foreground">
+      <TopBar
+        environmentLabel={environmentLabel}
+        statusLabel={bridgeStatus}
+        statusVariant={bridgeVariant}
+        metrics={topMetrics}
+        busy={busy}
+        onSynthesize={handleSynthesize}
         onCompare={handleCompare}
-        stats={globalStats}
-        isGeneratingBriefing={generatingBriefing}
+        onRefresh={handleRefresh}
       />
 
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Left Sidebar */}
-        <aside className={cn(
-          "glass-panel flex flex-col h-full z-20 transition-all duration-500 ease-in-out relative border-r border-white/5 bg-background/40 backdrop-blur-3xl",
-          leftPanelOpen ? "w-80" : "w-0 overflow-hidden"
-        )}>
-          {leftPanelOpen && (
-            <Tabs defaultValue="registry" className="flex-1 flex flex-col">
-              <TabsList className="w-full justify-start rounded-none border-b border-white/5 h-14 bg-transparent px-6 gap-8">
-                <TabsTrigger value="registry" className="h-14 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 text-[10px] font-bold uppercase tracking-[0.2em] transition-all opacity-60 data-[state=active]:opacity-100">Registry</TabsTrigger>
-                <TabsTrigger value="synapse" className="h-14 rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent px-0 text-[10px] font-bold uppercase tracking-[0.2em] transition-all flex gap-2 opacity-60 data-[state=active]:opacity-100">
-                  <Sparkles size={12} className="text-accent" /> Synapse
-                </TabsTrigger>
-                <TabsTrigger value="inspector" className="h-14 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-30 opacity-60 data-[state=active]:opacity-100" disabled={!selectedId}>
-                  Intelligence
-                </TabsTrigger>
-              </TabsList>
-              <div className="flex-1 overflow-hidden">
-                <TabsContent value="registry" className="h-full m-0 p-0">
-                  <ScrollArea className="h-full">
-                    <ComponentLibrary onAddComponent={handleAddComponent} />
-                  </ScrollArea>
-                </TabsContent>
-                <TabsContent value="synapse" className="h-full m-0 p-4">
-                  <ScrollArea className="h-full">
-                    <SynapseInsights blueprint={blueprint} onAddComponent={handleAddComponent} onUpdateBlueprint={setBlueprint} />
-                  </ScrollArea>
-                </TabsContent>
-                <TabsContent value="inspector" className="h-full m-0 p-4">
-                  <ScrollArea className="h-full">
-                    {selectedComponent ? (
-                      <BusinessROIInspector component={selectedComponent} />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-full text-center p-12 opacity-10">
-                        <Layout size={40} className="mb-4" />
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em]">Select Asset</p>
-                      </div>
+      <div className="flex h-[calc(100vh-80px)] min-h-0">
+        <LeftSidebar onAddComponent={handleAddComponent} activeNav={activeNav} onNavChange={setActiveNav} />
+
+        <section className="flex-1 min-w-0 relative flex flex-col">
+          <div className="border-b border-white/5 px-6 py-4 bg-card/20 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="inline-flex items-center rounded-full border border-white/10 bg-black/30 p-1">
+                {MODE_OPTIONS.map((mode) => (
+                  <button
+                    key={mode.id}
+                    onClick={() => setActiveMode(mode.id)}
+                    className={cn(
+                      "px-10 py-3 rounded-full text-xs font-black uppercase tracking-[0.3em] transition-all",
+                      activeMode === mode.id
+                        ? "bg-primary text-black shadow-[0_0_40px_rgba(0,242,255,0.25)]"
+                        : "text-muted-foreground hover:text-foreground"
                     )}
-                  </ScrollArea>
-                </TabsContent>
-              </div>
-            </Tabs>
-          )}
-          <Tooltip content={leftPanelOpen ? "Collapse Sidebar" : "Expand Sidebar"}>
-            <Button variant="ghost" size="icon" className="absolute -right-5 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full glass-panel z-30 border border-white/5 bg-background/60 backdrop-blur-xl group hover:bg-white/5" onClick={() => setLeftPanelOpen(!leftPanelOpen)}>
-              {leftPanelOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
-            </Button>
-          </Tooltip>
-        </aside>
-
-        {/* Main Canvas */}
-        <main className="flex-1 relative overflow-hidden canvas-grid">
-          <div className="absolute inset-0 overflow-auto scrollbar-hide" onClick={() => handleSelect(null)}>
-            <div className="relative min-w-[3000px] min-h-[3000px]">
-              <ConnectionsLayer components={blueprint.components} dependencies={blueprint.dependencies} isSimulating={isSimulating} />
-              {blueprint.components.map(comp => (
-                <CanvasNode
-                  key={comp.id}
-                  component={{ ...comp, hasGovernanceGap: governanceAnalysis.gapComponentIds.has(comp.id) }}
-                  isSelected={selectedId === comp.id}
-                  onSelect={handleSelect}
-                  onRemove={handleRemove}
-                  onDrag={handleDrag}
-                  isSimulating={isSimulating}
-                  heatmapMode={heatmapMode}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Floating Heatmap Controls */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-1.5 glass-panel rounded-full p-1.5 z-30 shadow-2xl ring-1 ring-white/10 bg-background/60 backdrop-blur-2xl">
-            <Button variant={heatmapMode === "none" ? "default" : "ghost"} size="sm" className="h-8 rounded-full text-[10px] font-bold uppercase tracking-widest px-6 btn-high-end" onClick={() => setHeatmapMode("none")}>Draft</Button>
-            <div className="w-px h-4 bg-white/10" />
-            <Button variant="ghost" size="sm" className={cn("h-8 rounded-full text-[10px] font-bold uppercase tracking-widest px-6 btn-high-end", heatmapMode === "roi" && "bg-emerald-500/20 text-emerald-400")} onClick={() => setHeatmapMode("roi")}>ROI</Button>
-            <Button variant="ghost" size="sm" className={cn("h-8 rounded-full text-[10px] font-bold uppercase tracking-widest px-6 btn-high-end", heatmapMode === "risk" && "bg-orange-500/20 text-orange-400")} onClick={() => setHeatmapMode("risk")}>Risk</Button>
-            <Button variant="ghost" size="sm" className={cn("h-8 rounded-full text-[10px] font-bold uppercase tracking-widest px-6 btn-high-end", heatmapMode === "quality" && "bg-blue-500/20 text-blue-400")} onClick={() => setHeatmapMode("quality")}>Debt</Button>
-          </div>
-
-          {/* Bottom Toolbar */}
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 glass-panel rounded-3xl px-8 py-3.5 flex items-center gap-8 z-30 shadow-[0_0_80px_rgba(0,0,0,0.8)] ring-1 ring-white/5 bg-background/60 backdrop-blur-2xl">
-            <div className="flex items-center gap-4 border-r pr-8 border-white/10">
-              <div className={cn("w-2.5 h-2.5 rounded-full", isSimulating ? "bg-accent shadow-[0_0_15px_rgba(0,255,255,0.8)] animate-pulse" : "bg-muted")} />
-              <div className="flex flex-col">
-                <span className="text-[9px] font-black text-muted-foreground uppercase tracking-[0.2em] leading-none mb-1">Engine</span>
-                <span className={cn("text-xs font-bold tracking-tight", isSimulating ? "text-accent" : "text-muted-foreground")}>{isSimulating ? "SIM ACTIVE" : "STANDBY"}</span>
-              </div>
-            </div>
-            {isSimulating && (
-              <div className="flex flex-col min-w-[120px]">
-                <span className="text-[9px] font-black text-muted-foreground uppercase tracking-[0.2em] leading-none mb-1">Yield</span>
-                <span className="text-sm font-mono text-emerald-400 font-bold tracking-tighter">${totalRevenue.toFixed(0)}</span>
-              </div>
-            )}
-            <div className="flex gap-1.5">
-              <Tooltip content={isSimulating ? "Stop Simulation" : "Start Simulation"}>
-                <Button size="icon" variant="ghost" onClick={() => setIsSimulating(!isSimulating)} className={cn("rounded-full h-10 w-10", isSimulating ? "bg-accent/10 text-accent" : "hover:bg-white/5")}>
-                  {isSimulating ? <Square size={16} /> : <Play size={16} />}
-                </Button>
-              </Tooltip>
-              <Tooltip content="Chaos Monkey \u2014 Inject Failure">
-                <Button size="icon" variant="ghost" onClick={toggleChaos} className="rounded-full h-10 w-10 hover:bg-orange-500/10 hover:text-orange-400 transition-all">
-                  <Flame size={16} />
-                </Button>
-              </Tooltip>
-              <Tooltip content="Market Sentinel \u2014 Scan Threats">
-                <Button size="icon" variant="ghost" onClick={runMarketSentinel} disabled={scanningMarket} className="rounded-full h-10 w-10 hover:bg-accent/10 hover:text-accent transition-all">
-                  {scanningMarket ? <Loader2 size={16} className="animate-spin" /> : <Radar size={16} />}
-                </Button>
-              </Tooltip>
-            </div>
-          </div>
-        </main>
-
-        {/* Right Sidebar */}
-        <aside className={cn(
-          "glass-panel flex flex-col h-full z-20 transition-all duration-500 ease-in-out relative border-l border-white/5 bg-background/40 backdrop-blur-3xl",
-          rightPanelOpen ? "w-96" : "w-0 overflow-hidden"
-        )}>
-          <Tooltip content={rightPanelOpen ? "Collapse Panel" : "Expand Panel"}>
-            <Button variant="ghost" size="icon" className="absolute -left-5 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full glass-panel z-30 border border-white/5 bg-background/60 backdrop-blur-xl hover:bg-white/5" onClick={() => setRightPanelOpen(!rightPanelOpen)}>
-              {rightPanelOpen ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-            </Button>
-          </Tooltip>
-          {rightPanelOpen && (
-            <Tabs defaultValue="insights" className="flex flex-col h-full">
-              <TabsList className="w-full justify-start rounded-none border-b border-white/5 bg-transparent h-14 px-8 gap-8">
-                <TabsTrigger value="insights" className="h-14 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 text-[10px] font-bold uppercase tracking-[0.2em] transition-all opacity-60 data-[state=active]:opacity-100">Strategic Audit</TabsTrigger>
-                <TabsTrigger value="impact" className="h-14 rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent px-0 text-[10px] font-bold uppercase tracking-[0.2em] transition-all opacity-60 data-[state=active]:opacity-100">Risk Analysis</TabsTrigger>
-              </TabsList>
-              <TabsContent value="insights" className="flex-1 m-0 p-0 overflow-hidden">
-                <ScrollArea className="h-full">
-                  <AIAnalysisPanel blueprint={blueprint} />
-                </ScrollArea>
-              </TabsContent>
-              <TabsContent value="impact" className="flex-1 m-0 p-0 overflow-hidden">
-                <ScrollArea className="h-full">
-                  <DependencyAnalysisPanel blueprint={blueprint} />
-                </ScrollArea>
-              </TabsContent>
-            </Tabs>
-          )}
-        </aside>
-      </div>
-
-      {/* Strategy Synthesis Modal */}
-      <Dialog open={strategyModalOpen} onOpenChange={setStrategyModalOpen}>
-        <DialogContent className="glass-panel bg-background/80 backdrop-blur-3xl border-white/10">
-          <DialogHeader>
-            <DialogTitle className="font-headline text-2xl">Strategic Synthesis</DialogTitle>
-            <DialogDescription className="text-muted-foreground">Define your market objective to generate a high-yield technical blueprint.</DialogDescription>
-          </DialogHeader>
-          <div className="py-6">
-            <Textarea
-              placeholder="e.g., Build a hyper-scale neobank supporting 1M+ active users with PCI-compliant real-time settling."
-              value={strategyGoal}
-              onChange={e => setStrategyGoal(e.target.value)}
-              className="min-h-[140px] rounded-2xl bg-white/5 border-white/10 focus:ring-primary/40 focus:border-primary/40"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setStrategyModalOpen(false)} className="rounded-xl">Cancel</Button>
-            <Button onClick={handleGenerateFromStrategy} disabled={generating || !strategyGoal} className="rounded-xl bg-primary px-8">
-              {generating ? <Loader2 className="animate-spin mr-2" size={18} /> : "Synthesize Architecture"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Board Briefing Modal */}
-      <Dialog open={briefingModalOpen} onOpenChange={setBriefingModalOpen}>
-        <DialogContent className="glass-panel bg-background/80 backdrop-blur-3xl border-white/10 max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-headline text-2xl flex items-center gap-3">
-              <FileText size={24} className="text-primary" /> Board Briefing
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 max-h-[60vh] overflow-y-auto space-y-6">
-            {generatingBriefing ? (
-              <div className="flex items-center justify-center py-12"><Loader2 size={32} className="animate-spin text-primary" /></div>
-            ) : briefing ? (
-              <>
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Executive Summary</h4>
-                  <p className="text-sm leading-relaxed">{briefing.executiveSummary}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400">ROI Projection</span>
-                    <p className="text-sm mt-1">{briefing.roiProjection}</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-orange-500/5 border border-orange-500/20">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-orange-400">Risk Mitigation</span>
-                    <p className="text-sm mt-1">{briefing.riskMitigation}</p>
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Short-Term Impact</h4>
-                  <p className="text-sm text-muted-foreground">{briefing.shortTermImpact}</p>
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Long-Term Impact</h4>
-                  <p className="text-sm text-muted-foreground">{briefing.longTermImpact}</p>
-                </div>
-              </>
-            ) : (
-              <p className="text-center text-muted-foreground">Could not generate briefing.</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Comparison Modal */}
-      <Dialog open={comparisonModalOpen} onOpenChange={setComparisonModalOpen}>
-        <DialogContent className="glass-panel bg-background/80 backdrop-blur-3xl border-white/10 max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="font-headline text-2xl flex items-center gap-3">
-              <Scale size={24} className="text-primary" /> Strategy Comparison
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6">
-            {comparing ? (
-              <div className="flex items-center justify-center py-12"><Loader2 size={32} className="animate-spin text-primary" /></div>
-            ) : comparison ? (
-              <div className="space-y-6">
-                <div className="text-center">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Winner</span>
-                  <p className="text-2xl font-heading font-bold text-emerald-400 mt-1">{comparison.winner}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 text-center">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">ROI Delta</span>
-                    <p className="text-xl font-bold font-heading text-emerald-400 mt-1">{comparison.roiDelta}</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 text-center">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Risk Delta</span>
-                    <p className="text-xl font-bold font-heading text-orange-400 mt-1">{comparison.riskDelta}</p>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground leading-relaxed">{comparison.reasoning}</p>
-              </div>
-            ) : (
-              <p className="text-center text-muted-foreground">Could not complete comparison.</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Market Sentinel Modal */}
-      <Dialog open={marketEventModalOpen} onOpenChange={(open) => {
-        setMarketEventModalOpen(open)
-        if (!open) setBlueprint(prev => ({ ...prev, components: prev.components.map(c => ({ ...c, isHighlighted: false })) }))
-      }}>
-        <DialogContent className="glass-panel border-accent/20 bg-background/80 backdrop-blur-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-3 text-accent text-xl font-headline tracking-tight">
-              <Radar size={24} className="animate-pulse" /> Strategic Market Alert
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 space-y-6">
-            <div className="space-y-2">
-              <h4 className="text-lg font-bold text-foreground">{activeMarketEvent?.title}</h4>
-              <p className="text-sm text-muted-foreground leading-relaxed">{activeMarketEvent?.description}</p>
-            </div>
-            <div className="p-4 bg-accent/5 rounded-2xl border border-accent/10">
-              <h5 className="text-[10px] font-bold uppercase tracking-[0.2em] mb-4 text-accent/80">Exposed Infrastructure</h5>
-              <div className="flex flex-wrap gap-2">
-                {activeMarketEvent?.affectedTypes.map(type => (
-                  <Badge key={type} variant="outline" className="text-[9px] uppercase tracking-wider py-1 px-3 bg-black/40 border-accent/20 text-accent">{type}</Badge>
+                  >
+                    {mode.label}
+                  </button>
                 ))}
               </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <Badge variant={errorMessages.length > 0 ? "destructive" : "secondary"}>
+                  {loading ? "Loading live system" : lastAction}
+                </Badge>
+                <Button variant="outline" size="sm" onClick={handleRefresh} disabled={busy}>
+                  {busy ? <RefreshCw className="h-3.5 w-3.5 mr-2 animate-spin" /> : <Activity className="h-3.5 w-3.5 mr-2" />}
+                  Sync Truth
+                </Button>
+              </div>
             </div>
+
+            {errorMessages.length > 0 && (
+              <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-start gap-3">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-semibold">Live data is partial</div>
+                  <div className="text-destructive/80 text-xs mt-1">{errorMessages.join(" | ")}</div>
+                </div>
+              </div>
+            )}
           </div>
-          <DialogFooter><Button onClick={() => setMarketEventModalOpen(false)} className="w-full rounded-xl bg-accent text-black hover:bg-accent/90">Acknowledge Impact</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+
+          <ArchitectureCanvas
+            components={components}
+            edges={edges}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onRemove={handleRemove}
+            onDrag={handleDrag}
+            onCanvasClick={() => setSelectedId(null)}
+          />
+        </section>
+
+        <RightAnalytics
+          engineLabel="Bidirectional Engine"
+          bridgeStatus={bridgeStatus}
+          bridgeVariant={bridgeVariant}
+          summaryMetrics={summaryMetrics}
+          scoreBars={scoreBars}
+          monetizationPotential={dashboard?.metrics.total_volume_formatted || "$0.00"}
+          recommendations={recommendationSignals}
+          heldPayouts={heldPayouts}
+          releasingPayoutId={releasingPayoutId}
+          onReleasePayout={handleReleasePayout}
+          systemSignals={systemSignals}
+        />
+      </div>
+    </main>
   )
 }

@@ -1,6 +1,8 @@
 const transactionService = require('../services/transactionService');
 const customerService = require('../services/customerService');
 const payoutService = require('../services/payoutService');
+const riskService = require('../services/riskService');
+const riskSequenceService = require('../services/riskSequenceService');
 const blueprintService = require('../services/blueprintService');
 const db = require('../db');
 const { TransactionService, PaymentStatus } = require('../services/transactionService');
@@ -258,19 +260,308 @@ describe('Customer Service', () => {
   });
 });
 
+describe('Risk Service', () => {
+  it('should cache royalty risk decisions by idempotency key', async () => {
+    const organizationId = `org_risk_${Date.now()}`;
+    const idempotencyKey = `risk_idem_${Date.now()}`;
+    const payload = {
+      amount: 2500,
+      currency: 'USD',
+      creatorId: 'creator-risk',
+      trackId: 'track-risk',
+      deviceId: 'device-risk',
+      email: `creator-risk-${Date.now()}@example.com`,
+      payoutDestination: 'acct_shared_destination',
+      dnaVerified: true,
+      soulprintVerified: true,
+      ledgerRecordFound: true,
+      usageCount: 10,
+      creatorAccountAgeDays: 90,
+      payoutMethodAgeDays: 90,
+      duplicatePayoutDestination: false,
+      payoutDestinationChangedRecently: false,
+      suddenUsageSpike: false,
+      eventType: 'royalty_payout_request',
+    };
+
+    const first = await riskService.createRoyaltyRiskDecision({
+      organizationId,
+      event: payload,
+      idempotencyKey,
+    });
+
+    const second = await riskService.createRoyaltyRiskDecision({
+      organizationId,
+      event: payload,
+      idempotencyKey,
+    });
+
+    expect(first.id).toBe(second.id);
+    expect(first.riskScore).toBe(second.riskScore);
+  });
+
+  it('should summarize risk outcomes for an organization', async () => {
+    const organizationId = `org_risk_summary_${Date.now()}`;
+
+    await riskService.createRoyaltyRiskDecision({
+      organizationId,
+      idempotencyKey: `risk_summary_a_${Date.now()}`,
+      event: {
+        amount: 9000,
+        currency: 'USD',
+        creatorId: 'creator-summary-a',
+        payoutDestination: 'acct_summary_a',
+        dnaVerified: false,
+        soulprintVerified: false,
+        ledgerRecordFound: false,
+        usageCount: 12000,
+        creatorAccountAgeDays: 1,
+        payoutMethodAgeDays: 0,
+        duplicatePayoutDestination: true,
+        payoutDestinationChangedRecently: true,
+        suddenUsageSpike: true,
+        eventType: 'royalty_payout_request',
+      },
+    });
+
+    await riskService.createRoyaltyRiskDecision({
+      organizationId,
+      idempotencyKey: `risk_summary_b_${Date.now()}`,
+      event: {
+        amount: 100,
+        currency: 'USD',
+        creatorId: 'creator-summary-b',
+        payoutDestination: 'acct_summary_b',
+        dnaVerified: true,
+        soulprintVerified: true,
+        ledgerRecordFound: true,
+        usageCount: 5,
+        creatorAccountAgeDays: 180,
+        payoutMethodAgeDays: 180,
+        duplicatePayoutDestination: false,
+        payoutDestinationChangedRecently: false,
+        suddenUsageSpike: false,
+        eventType: 'royalty_payout_request',
+      },
+    });
+
+    const summary = await riskService.getRiskSummary(organizationId);
+
+    expect(summary.totalEvents).toBe(2);
+    expect(summary.blockedPayoutEvents).toBe(1);
+    expect(summary.releasedPayoutEvents).toBe(1);
+    expect(summary.averageRiskScore).toBeGreaterThan(0);
+  });
+
+  it('should export Archisynapse-native creator risk sequences for model sidecars', async () => {
+    const organizationId = `org_seq_${Date.now()}`;
+    const recipientId = `creator_seq_${Date.now()}`;
+    const processorAccountId = `acct_seq_${Date.now()}`;
+
+    const account = await payoutService.registerRecipientAccount({
+      organizationId,
+      recipientId,
+      processorAccountId,
+      currency: 'USD',
+    });
+    await payoutService.verifyRecipientAccount(organizationId, account.id);
+
+    await payoutService.createPayout({
+      organizationId,
+      recipientAccountId: account.id,
+      amount: 41,
+      currency: 'USD',
+      idempotencyKey: `idem_seq_${Date.now()}`,
+      sourceType: 'EARNINGS',
+      sourceReferenceId: `royalty_seq_${Date.now()}`,
+    });
+
+    await riskService.createRoyaltyRiskDecision({
+      organizationId,
+      idempotencyKey: `risk_seq_${Date.now()}`,
+      event: {
+        eventType: 'royalty_payout_request',
+        amount: 41,
+        currency: 'USD',
+        creatorId: recipientId,
+        payoutDestination: processorAccountId,
+        dnaVerified: true,
+        soulprintVerified: true,
+        ledgerRecordFound: true,
+        usageCount: 1200,
+        suddenUsageSpike: false,
+        creatorAccountAgeDays: 40,
+        payoutMethodAgeDays: 1,
+        duplicatePayoutDestination: false,
+        payoutDestinationChangedRecently: true,
+      },
+    });
+
+    const sequences = await riskSequenceService.listCreatorRiskSequences(organizationId, {
+      recipientId,
+      limit: 5,
+      eventLimit: 10,
+    });
+
+    expect(sequences.total).toBe(1);
+    expect(sequences.items[0].recipientId).toBe(recipientId);
+    expect(sequences.items[0].eventCount).toBeGreaterThanOrEqual(2);
+    expect(sequences.items[0].corpus).toContain('EVT_PAYOUT_PAID');
+    expect(sequences.items[0].corpus).toContain('EVT_RISK_DELAY_PAYOUT_72H');
+    expect(sequences.items[0].supervisionTarget).toBe('delayed_release');
+  });
+});
+
 describe('Payout Service', () => {
+  let organizationId;
+
+  beforeAll(async () => {
+    organizationId = `org_payout_${Date.now()}`;
+    const account = await payoutService.registerRecipientAccount({
+      organizationId,
+      recipientId: `recipient_${Date.now()}`,
+      processorAccountId: 'acct_services_test',
+      currency: 'USD',
+    });
+    await payoutService.verifyRecipientAccount(organizationId, account.id);
+    await payoutService.createPayout({
+      organizationId,
+      recipientAccountId: account.id,
+      amount: 45,
+      currency: 'USD',
+      idempotencyKey: `idem_payout_services_${Date.now()}`,
+      sourceType: 'MANUAL',
+    });
+  });
+
   it('should list payouts with default params', async () => {
-    const result = await payoutService.listPayouts();
+    const result = await payoutService.listPayouts(organizationId);
     expect(result).toHaveProperty('data');
     expect(result).toHaveProperty('total');
     expect(result.total).toBeGreaterThan(0);
   });
 
   it('should filter payouts by status', async () => {
-    const result = await payoutService.listPayouts({ status: 'completed' });
+    const result = await payoutService.listPayouts(organizationId, { status: 'PAID' });
     result.data.forEach(p => {
-      expect(p.status).toBe('completed');
+      expect(p.status).toBe('PAID');
     });
+  });
+
+  it('should block high-risk payouts before money movement', async () => {
+    const account = await payoutService.registerRecipientAccount({
+      organizationId,
+      recipientId: `recipient_block_${Date.now()}`,
+      processorAccountId: 'acct_services_block',
+      currency: 'USD',
+    });
+    await payoutService.verifyRecipientAccount(organizationId, account.id);
+
+    await expect(
+      payoutService.createPayout({
+        organizationId,
+        recipientAccountId: account.id,
+        amount: 120,
+        currency: 'USD',
+        idempotencyKey: `idem_payout_block_${Date.now()}`,
+        sourceType: 'EARNINGS',
+        sourceReferenceId: `royalty_${Date.now()}`,
+        riskContext: {
+          creatorId: 'creator-risk-blocked',
+          payoutDestination: 'acct_services_block',
+          dnaVerified: false,
+          soulprintVerified: false,
+          ledgerRecordFound: false,
+          creatorAccountAgeDays: 1,
+          payoutMethodAgeDays: 0,
+          suddenUsageSpike: true,
+        },
+      })
+    ).rejects.toMatchObject({ code: 'risk_blocked', statusCode: 403 });
+  });
+
+  it('should hold medium-high risk payouts for manual review until released', async () => {
+    const account = await payoutService.registerRecipientAccount({
+      organizationId,
+      recipientId: `recipient_hold_${Date.now()}`,
+      processorAccountId: 'acct_services_hold',
+      currency: 'USD',
+    });
+    await payoutService.verifyRecipientAccount(organizationId, account.id);
+
+    const payout = await payoutService.createPayout({
+      organizationId,
+      recipientAccountId: account.id,
+      amount: 95,
+      currency: 'USD',
+      idempotencyKey: `idem_payout_hold_${Date.now()}`,
+      sourceType: 'EARNINGS',
+      sourceReferenceId: `royalty_hold_${Date.now()}`,
+      riskContext: {
+        creatorId: 'creator-risk-hold',
+        payoutDestination: 'acct_services_hold',
+        dnaVerified: false,
+        soulprintVerified: false,
+        ledgerRecordFound: true,
+        creatorAccountAgeDays: 90,
+        payoutMethodAgeDays: 90,
+        suddenUsageSpike: false,
+      },
+    });
+
+    expect(payout.status).toBe('PENDING');
+    expect(payout.manualReviewRequired).toBe(true);
+    expect(payout.riskDecision?.decision).toBe('hold_payout_review');
+
+    const scheduled = await payoutService.processScheduledPayouts(organizationId);
+    expect(scheduled.processed).toBe(0);
+    expect(scheduled.failed).toBe(0);
+
+    const released = await payoutService.releasePayoutManualReview(
+      organizationId,
+      payout.id,
+      'Analyst approved creator payout'
+    );
+
+    expect(released.status).toBe('PAID');
+    expect(released.manualReviewRequired).toBe(false);
+    expect(released.metadata.manualReviewReleasedAt).toBeDefined();
+  });
+
+  it('should delay medium-risk payouts by 72 hours', async () => {
+    const account = await payoutService.registerRecipientAccount({
+      organizationId,
+      recipientId: `recipient_delay_${Date.now()}`,
+      processorAccountId: 'acct_services_delay',
+      currency: 'USD',
+    });
+    await payoutService.verifyRecipientAccount(organizationId, account.id);
+
+    const before = Date.now();
+    const payout = await payoutService.createPayout({
+      organizationId,
+      recipientAccountId: account.id,
+      amount: 77,
+      currency: 'USD',
+      idempotencyKey: `idem_payout_delay_${Date.now()}`,
+      sourceType: 'EARNINGS',
+      sourceReferenceId: `royalty_delay_${Date.now()}`,
+      riskContext: {
+        creatorId: 'creator-risk-delay',
+        payoutDestination: 'acct_services_delay',
+        dnaVerified: true,
+        soulprintVerified: true,
+        ledgerRecordFound: true,
+        creatorAccountAgeDays: 45,
+        payoutMethodAgeDays: 1,
+        payoutDestinationChangedRecently: true,
+      },
+    });
+
+    expect(payout.status).toBe('PENDING');
+    expect(payout.manualReviewRequired).toBe(false);
+    expect(payout.riskDecision?.decision).toBe('delay_payout_72h');
+    expect(new Date(payout.scheduledFor).getTime()).toBeGreaterThanOrEqual(before + (71 * 60 * 60 * 1000));
   });
 });
 

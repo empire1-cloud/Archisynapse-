@@ -3,6 +3,7 @@ const nodeCrypto = require('crypto');
 const logger = require('../utils/logger');
 const { AppError } = require('../middleware/errorHandler');
 const { LedgerClient } = require('./ledgerClient');
+const stripeGateway = require('./stripeGateway');
 
 const PAYMENT_TABLE = 'payments';
 const REFUND_TABLE = 'refunds';
@@ -106,6 +107,8 @@ class TransactionService {
       .update({
         status: PaymentStatus.SUCCEEDED,
         processor_transaction_id: processorResult.processorTransactionId || null,
+        payment_method_last4: processorResult.paymentMethodLast4 || null,
+        payment_method_brand: processorResult.paymentMethodBrand || null,
         updated_at: new Date().toISOString(),
       });
 
@@ -172,6 +175,20 @@ class TransactionService {
       throw new AppError('Cannot refund: payment has not been posted to the ledger yet', 409, 'missing_ledger_transaction');
     }
 
+    const processorRefund = await this.callProcessorRefund({
+      payment,
+      amount: refundAmount,
+      reason: req.reason,
+    });
+
+    if (!processorRefund.success) {
+      throw new AppError(
+        processorRefund.failureMessage || 'Processor refund failed',
+        502,
+        'processor_refund_failed'
+      );
+    }
+
     const ledgerReversal = await this.ledgerClient.postRefund({
       organizationId: payment.organizationId,
       originalLedgerTransactionId: payment.ledgerTransactionId,
@@ -189,6 +206,7 @@ class TransactionService {
       reason: req.reason,
       status: 'SUCCEEDED',
       idempotency_key: req.idempotencyKey,
+      processor_refund_id: processorRefund.processorRefundId || null,
       ledger_transaction_id: ledgerReversal.id,
       created_at: now,
     });
@@ -208,6 +226,7 @@ class TransactionService {
       amount: normalizeAmount(refundAmount),
       reason: req.reason,
       status: 'SUCCEEDED',
+      processor_refund_id: processorRefund.processorRefundId || null,
       ledger_transaction_id: ledgerReversal.id,
       created_at: now,
     });
@@ -363,11 +382,65 @@ class TransactionService {
     return row ? this.rowToPayment(row) : null;
   }
 
-  async callProcessor() {
-    return {
-      success: true,
-      processorTransactionId: `proc_${createId('txn').slice(4)}`,
-    };
+  async callProcessor(req) {
+    const localCustomer = await this.lookupCustomer(req.customerId);
+
+    const stripeCustomer = await stripeGateway.ensureCustomer({
+      existingStripeCustomerId: localCustomer?.stripe_customer_id || null,
+      email: localCustomer?.email || null,
+      name: localCustomer?.display_name || null,
+      metadata: {
+        organization_id: req.organizationId,
+        local_customer_id: req.customerId || '',
+      },
+    });
+
+    if (stripeCustomer.id && localCustomer && !localCustomer.stripe_customer_id) {
+      await this.db('customers')
+        .where({ id: localCustomer.id })
+        .update({
+          stripe_customer_id: stripeCustomer.id,
+          updated_at: new Date().toISOString(),
+        });
+    }
+
+    return stripeGateway.createPayment({
+      amount: req.amount,
+      currency: req.currency,
+      paymentMethodToken: req.paymentMethod.token,
+      customerId: stripeCustomer.id || null,
+      description: req.description,
+      metadata: {
+        organization_id: req.organizationId,
+        payment_id: req.idempotencyKey,
+        ...(req.metadata || {}),
+      },
+    });
+  }
+
+  async callProcessorRefund({ payment, amount, reason }) {
+    if (!payment.processorTransactionId) {
+      throw new AppError('Cannot refund: processor transaction id missing', 409, 'missing_processor_transaction');
+    }
+
+    return stripeGateway.createRefund({
+      processorTransactionId: payment.processorTransactionId,
+      amount,
+      currency: payment.currency,
+      reason,
+      metadata: {
+        organization_id: payment.organizationId,
+        payment_id: payment.id,
+      },
+    });
+  }
+
+  async lookupCustomer(customerId) {
+    if (!customerId) {
+      return null;
+    }
+
+    return this.db('customers').where({ id: customerId }).first();
   }
 
   rowToPayment(row) {
@@ -392,6 +465,7 @@ class TransactionService {
       },
       description: row.description,
       idempotencyKey: row.idempotency_key,
+      processorTransactionId: row.processor_transaction_id || null,
       ledgerTransactionId: row.ledger_transaction_id,
       failureReason: row.failure_reason,
       metadata: parseJson(row.metadata),
@@ -408,6 +482,7 @@ class TransactionService {
       amount: Number(row.amount),
       reason: row.reason,
       status: row.status,
+      processorRefundId: row.processor_refund_id || null,
       ledgerTransactionId: row.ledger_transaction_id,
       createdAt: row.created_at,
     };
