@@ -299,20 +299,9 @@ describe('Ledger Integration', () => {
     const isPostgres = ['pg', 'postgresql'].includes(db.client.config.client);
     if (isPostgres) {
       await db.raw(`
-        CREATE OR REPLACE FUNCTION trg_test_block_reverse_status_fn()
-        RETURNS trigger AS $
-        BEGIN
-          IF OLD.id = '${original.id}' AND NEW.status = 'REVERSED' THEN
-            RAISE EXCEPTION 'blocked reverse update';
-          END IF;
-          RETURN NEW;
-        END;
-        $ LANGUAGE plpgsql;
-
-        CREATE TRIGGER trg_test_block_reverse_status
-        BEFORE UPDATE ON ledger_transactions
-        FOR EACH ROW
-        EXECUTE FUNCTION trg_test_block_reverse_status_fn();
+        ALTER TABLE ledger_transactions
+        ADD CONSTRAINT chk_test_block_reverse_status
+        CHECK (NOT (id = '${original.id}' AND status = 'REVERSED'))
       `);
     } else {
       await db.raw(`
@@ -344,8 +333,7 @@ describe('Ledger Integration', () => {
     expect(originalAfter.status).toBe('POSTED');
 
     if (isPostgres) {
-      await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status ON ledger_transactions');
-      await db.raw('DROP FUNCTION IF EXISTS trg_test_block_reverse_status_fn()');
+      await db.raw('ALTER TABLE ledger_transactions DROP CONSTRAINT IF EXISTS chk_test_block_reverse_status');
     } else {
       await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status');
     }
