@@ -23,11 +23,11 @@ exports.up = async function (knex) {
 
   // ── customers ──
   await knex.schema.createTable('customers', (t) => {
-    t.uuid('id').primary();
+    t.string('id').primary();
     t.string('creator_id').unique().notNullable();
     t.string('display_name').notNullable();
     t.decimal('wallet_balance', 10, 6).notNullable().defaultTo(0);
-    t.uuid('referral_parent_id').nullable().references('id').inTable('customers').onDelete('set null');
+    t.string('referral_parent_id').nullable().references('id').inTable('customers').onDelete('set null');
     t.string('stripe_customer_id').nullable();
     t.string('email').nullable();
     t.jsonb('metadata').nullable().defaultTo('{}');
@@ -40,7 +40,7 @@ exports.up = async function (knex) {
   // ── payouts ──
   await knex.schema.createTable('payouts', (t) => {
     t.uuid('id').primary();
-    t.uuid('customer_id').notNullable().references('id').inTable('customers').onDelete('cascade');
+    t.string('customer_id').notNullable().references('id').inTable('customers').onDelete('cascade');
     t.decimal('amount', 10, 6).notNullable();
     t.enu('status', ['queued', 'processing', 'sent', 'failed']).notNullable().defaultTo('queued');
     t.string('payout_method', 50).nullable();
