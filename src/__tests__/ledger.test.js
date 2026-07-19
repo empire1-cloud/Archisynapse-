@@ -296,14 +296,34 @@ describe('Ledger Integration', () => {
       ],
     });
 
-    await db.raw(`
-      CREATE TRIGGER trg_test_block_reverse_status
-      BEFORE UPDATE ON ledger_transactions
-      WHEN OLD.id = '${original.id}' AND NEW.status = 'REVERSED'
-      BEGIN
-        SELECT RAISE(ABORT, 'blocked reverse update');
-      END;
-    `);
+    const isPostgres = ['pg', 'postgresql'].includes(db.client.config.client);
+    if (isPostgres) {
+      await db.raw(`
+        CREATE OR REPLACE FUNCTION trg_test_block_reverse_status_fn()
+        RETURNS trigger AS $
+        BEGIN
+          IF OLD.id = '${original.id}' AND NEW.status = 'REVERSED' THEN
+            RAISE EXCEPTION 'blocked reverse update';
+          END IF;
+          RETURN NEW;
+        END;
+        $ LANGUAGE plpgsql;
+
+        CREATE TRIGGER trg_test_block_reverse_status
+        BEFORE UPDATE ON ledger_transactions
+        FOR EACH ROW
+        EXECUTE FUNCTION trg_test_block_reverse_status_fn();
+      `);
+    } else {
+      await db.raw(`
+        CREATE TRIGGER trg_test_block_reverse_status
+        BEFORE UPDATE ON ledger_transactions
+        WHEN OLD.id = '${original.id}' AND NEW.status = 'REVERSED'
+        BEGIN
+          SELECT RAISE(ABORT, 'blocked reverse update');
+        END;
+      `);
+    }
 
     await expect(
       ledgerService.reverseTransaction({
@@ -323,7 +343,12 @@ describe('Ledger Integration', () => {
     });
     expect(originalAfter.status).toBe('POSTED');
 
-    await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status');
+    if (isPostgres) {
+      await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status ON ledger_transactions');
+      await db.raw('DROP FUNCTION IF EXISTS trg_test_block_reverse_status_fn()');
+    } else {
+      await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status');
+    }
   });
 
   it('keeps idempotency stable even after stored expiry passes', async () => {
