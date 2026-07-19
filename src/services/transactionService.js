@@ -344,7 +344,7 @@ class TransactionService {
       .orderBy('created_at', 'desc');
     if (status) query = query.andWhere({ status });
 
-    const [{ count }] = await query.clone().count('* as count');
+    const [{ count }] = await query.clone().clearOrder().count('* as count');
     const rows = await query.limit(Math.min(Number(limit), 100)).offset(Number(offset));
 
     return {

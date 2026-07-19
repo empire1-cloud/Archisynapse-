@@ -14,6 +14,7 @@ const payoutRoutes = require('./routes/payouts');
 const webhookRoutes = require('./routes/webhooks');
 const dashboardRoutes = require('./routes/dashboard');
 const blueprintRoutes = require('./routes/blueprints');
+const recommendationRoutes = require('./routes/recommendation');
 const ledgerRoutes = require('./routes/ledger');
 const riskRoutes = require('./routes/risk');
 
@@ -70,6 +71,7 @@ app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/payouts', payoutRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/blueprints', recommendationRoutes);
 app.use('/api/v1/blueprints', blueprintRoutes);
 app.use('/api/v1/ledger', ledgerRoutes);
 app.use('/api/v1/risk', riskRoutes);

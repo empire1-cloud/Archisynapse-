@@ -18,12 +18,19 @@ exports.up = async function (knex) {
 
   const hasPayouts = await knex.schema.hasTable('payouts');
   if (hasPayouts) {
-    const cols = await knex.raw("PRAGMA table_info(payouts)");
-    const hasLegacySchema = cols.rows
-      ? !cols.rows.some((c) => c.name === 'idempotency_key')
-      : !cols.some((c) => c.name === 'idempotency_key');
-    if (hasLegacySchema) {
-      await knex.raw('ALTER TABLE payouts RENAME TO payouts_legacy');
+    const hasIdempotencyKey = await knex.schema.hasColumn('payouts', 'idempotency_key');
+    if (!hasIdempotencyKey) {
+      const hasLegacyTable = await knex.schema.hasTable('payouts_legacy');
+      if (!hasLegacyTable) {
+        await knex.schema.renameTable('payouts', 'payouts_legacy');
+
+        const client = knex.client.config.client;
+        if (client === 'pg' || client === 'postgresql') {
+          await knex.raw('ALTER INDEX IF EXISTS payouts_pkey RENAME TO payouts_legacy_pkey');
+          await knex.raw('ALTER INDEX IF EXISTS payouts_customer_id_index RENAME TO payouts_legacy_customer_id_index');
+          await knex.raw('ALTER INDEX IF EXISTS payouts_status_index RENAME TO payouts_legacy_status_index');
+        }
+      }
     }
   }
 

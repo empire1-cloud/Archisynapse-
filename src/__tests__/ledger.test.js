@@ -296,14 +296,23 @@ describe('Ledger Integration', () => {
       ],
     });
 
-    await db.raw(`
-      CREATE TRIGGER trg_test_block_reverse_status
-      BEFORE UPDATE ON ledger_transactions
-      WHEN OLD.id = '${original.id}' AND NEW.status = 'REVERSED'
-      BEGIN
-        SELECT RAISE(ABORT, 'blocked reverse update');
-      END;
-    `);
+    const isPostgres = ['pg', 'postgresql'].includes(db.client.config.client);
+    if (isPostgres) {
+      await db.raw(`
+        ALTER TABLE ledger_transactions
+        ADD CONSTRAINT chk_test_block_reverse_status
+        CHECK (NOT (id = '${original.id}' AND status = 'REVERSED'))
+      `);
+    } else {
+      await db.raw(`
+        CREATE TRIGGER trg_test_block_reverse_status
+        BEFORE UPDATE ON ledger_transactions
+        WHEN OLD.id = '${original.id}' AND NEW.status = 'REVERSED'
+        BEGIN
+          SELECT RAISE(ABORT, 'blocked reverse update');
+        END;
+      `);
+    }
 
     await expect(
       ledgerService.reverseTransaction({
@@ -311,7 +320,7 @@ describe('Ledger Integration', () => {
         transactionId: original.id,
         reason: 'Should rollback',
       })
-    ).rejects.toThrow(/blocked reverse update/i);
+    ).rejects.toThrow(isPostgres ? /chk_test_block_reverse_status/i : /blocked reverse update/i);
 
     const reversalRows = await db(ledgerService.TABLES.transactions)
       .where({ organization_id: organizationId, reference_id: original.id, type: 'REVERSAL' });
@@ -323,7 +332,11 @@ describe('Ledger Integration', () => {
     });
     expect(originalAfter.status).toBe('POSTED');
 
-    await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status');
+    if (isPostgres) {
+      await db.raw('ALTER TABLE ledger_transactions DROP CONSTRAINT IF EXISTS chk_test_block_reverse_status');
+    } else {
+      await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status');
+    }
   });
 
   it('keeps idempotency stable even after stored expiry passes', async () => {
