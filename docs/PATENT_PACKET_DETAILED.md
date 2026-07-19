@@ -1,8 +1,10 @@
 # Patent Packet — Detailed
 
+> Status: preliminary inventor-disclosure draft for qualified counsel review. This is not a filing-ready claim set and is not legal advice.
+
 This document expands the provisional brief into a more detailed package suitable for counsel to review for provisional filing. It includes extended claims, example workflows, and figure callouts.
 
-## Extended claim set (15 claims)
+## Proposed claim concepts (15 items; counsel drafting required)
 1. (See PATENT_BRIEF.md claim 1) A computer-implemented system comprising: blueprint ingestion, feature extraction, recommendation engine (structured model + LLM), and event-sourced ledger that records recommendations and outcomes and uses outcomes to retrain the model.
 
 2. The system of claim 1, further comprising a semantic embedding index and graph-based precedent retrieval used to score and rank candidate recommendations.
@@ -34,9 +36,9 @@ This document expands the provisional brief into a more detailed package suitabl
 15. A method claim mirroring system claims: ingest blueprint, extract features, generate ranked recommendations, present to human operator, record decision, retrain model from outcomes.
 
 ## Example figures (to attach)
-- Figure 1: System overview (blueprint ingestion → embedding/graph → structured model + LLM → recommendation output → ledger → feedback pipeline)
-- Figure 2: Data flow for recommendation acceptance and training feedback
-- Figure 3: Component registry schema and marketplace payout flow
+- Figure 1 (included as `diagrams/arch_blueprint_flow.svg`): System overview (blueprint ingestion → embedding/graph → structured model + LLM → recommendation output → ledger → feedback pipeline)
+- Figure 2 (proposed; not yet attached): Data flow for recommendation acceptance and training feedback
+- Figure 3 (proposed; not yet attached): Component registry schema and marketplace payout flow
 
 ## Example anonymized blueprint (for counsel)
 ```json
