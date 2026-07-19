@@ -23,6 +23,13 @@ exports.up = async function (knex) {
       const hasLegacyTable = await knex.schema.hasTable('payouts_legacy');
       if (!hasLegacyTable) {
         await knex.schema.renameTable('payouts', 'payouts_legacy');
+
+        const client = knex.client.config.client;
+        if (client === 'pg' || client === 'postgresql') {
+          await knex.raw('ALTER INDEX IF EXISTS payouts_pkey RENAME TO payouts_legacy_pkey');
+          await knex.raw('ALTER INDEX IF EXISTS payouts_customer_id_index RENAME TO payouts_legacy_customer_id_index');
+          await knex.raw('ALTER INDEX IF EXISTS payouts_status_index RENAME TO payouts_legacy_status_index');
+        }
       }
     }
   }
