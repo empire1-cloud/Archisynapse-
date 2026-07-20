@@ -47,6 +47,13 @@ const PAYOUTS = [
 const seed = async () => {
   const customers = [];
   for (const c of CUSTOMERS) {
+    // Idempotent: reuse an existing customer with the same email so the
+    // seed (and demo) can be run more than once against the same database.
+    const existing = await db('customers').where({ email: c.email }).first();
+    if (existing) {
+      customers.push(existing);
+      continue;
+    }
     const customer = await customerService.createCustomer(c);
     customers.push(customer);
   }

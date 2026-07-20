@@ -24,6 +24,22 @@ exports.up = async function (knex) {
       : !cols.some((c) => c.name === 'idempotency_key');
     if (hasLegacySchema) {
       await knex.raw('ALTER TABLE payouts RENAME TO payouts_legacy');
+      // Renaming a table does NOT rename its indexes (SQLite and Postgres both
+      // keep index names in a global namespace), so the legacy indexes would
+      // collide with the new payouts table's indexes. Rename them out of the way.
+      const isSqlite = ['sqlite3', 'better-sqlite3'].includes(knex.client.config.client);
+      for (const idx of ['payouts_customer_id_index', 'payouts_status_index']) {
+        if (isSqlite) {
+          await knex.raw(`DROP INDEX IF EXISTS ${idx}`);
+        } else {
+          await knex.raw(`ALTER INDEX IF EXISTS ${idx} RENAME TO legacy_${idx}`);
+        }
+      }
+      if (isSqlite) {
+        // Recreate the dropped indexes on the renamed legacy table.
+        await knex.raw('CREATE INDEX IF NOT EXISTS legacy_payouts_customer_id_index ON payouts_legacy (customer_id)');
+        await knex.raw('CREATE INDEX IF NOT EXISTS legacy_payouts_status_index ON payouts_legacy (status)');
+      }
     }
   }
 

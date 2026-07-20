@@ -17,6 +17,10 @@ build/
 !src/**/*.js
 !demo.js
 !jest.config.js
+!jest.sequencer.js
+!knexfile.js
+!clients/**/*.js
+!studio/**/*.js
 *.d.ts
 
 # IDE

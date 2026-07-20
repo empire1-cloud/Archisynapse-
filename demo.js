@@ -38,8 +38,9 @@ const run = async () => {
 
   // 4. Create a new customer
   console.log('>>> POST /api/v1/customers\n');
+  const demoEmail = `demo+${Date.now()}@archisynapse.io`;
   const newCust = await customerService.createCustomer({
-    email: 'demo@archisynapse.io',
+    email: demoEmail,
     name: 'Demo User'
   });
   console.log(`  Created: ${newCust.id} — ${newCust.name} (${newCust.email})`);
@@ -74,8 +75,9 @@ const run = async () => {
 
   // 8. Dashboard metrics
   console.log('>>> GET /api/v1/dashboard\n');
-  const allTxns = Array.from(transactionService.transactions.values());
-  const succeeded = allTxns.filter(t => t.status === 'succeeded');
+  const allTxnsResult = await transactionService.listTransactions({ limit: 1000 });
+  const allTxns = allTxnsResult.data || allTxnsResult || [];
+  const succeeded = allTxns.filter(t => String(t.status).toUpperCase() === 'SUCCEEDED');
   const totalVolume = succeeded.reduce((sum, t) => sum + t.amount, 0);
   const successRate = allTxns.length > 0 ? (succeeded.length / allTxns.length * 100).toFixed(1) : 0;
 

@@ -296,6 +296,7 @@ describe('Ledger Integration', () => {
       ],
     });
 
+    await db.raw('DROP TRIGGER IF EXISTS trg_test_block_reverse_status');
     await db.raw(`
       CREATE TRIGGER trg_test_block_reverse_status
       BEFORE UPDATE ON ledger_transactions
